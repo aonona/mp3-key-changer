@@ -16,16 +16,12 @@
     .status { margin-top: 10px; font-weight: bold; color: green; }
     .key-control-buttons { display: flex; gap: 8px; align-items: center; }
     .time-display { margin-top: 10px; font-size: 14px; color: #333; }
-    .loading-overlay {
-      position: fixed; inset: 0;
-      background: rgba(255,255,255,0.8); display: none;
-      justify-content: center; align-items: center;
-      font-size: 20px; font-weight: bold; color: #333;
-      z-index: 9999;
-    }
-    footer { position: fixed; inset-block-end: 0; inset-inline: 0;
-      background: #f2f2f2; padding: 10px 20px; border-top: 1px solid #ccc;
-      text-align: center; font-size: 14px; color: #666; }
+    .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.8);
+      display: none; justify-content: center; align-items: center;
+      font-size: 20px; font-weight: bold; color: #333; z-index: 9999; }
+    footer { position: fixed; inset-block-end: 0; inset-inline: 0; background: #f2f2f2;
+      padding: 10px 20px; border-top: 1px solid #ccc; text-align: center;
+      font-size: 14px; color: #666; }
     @media (max-width: 600px) {
       body { padding: 10px; font-size: 16px; }
       h1 { font-size: 20px; }
@@ -37,7 +33,7 @@
 </head>
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
-  <h1>クライアントサイド MP3 キーチェンジャー1.5</h1>
+  <h1>クライアントサイド MP3 キーチェンジャー1.3</h1>
 
   <input type="file" id="fileInput" multiple accept="audio/mp3">
   <div id="playlist"></div>
@@ -76,13 +72,13 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ======== グローバル ======== */
+/* ======== 変数 ======== */
 let playlist = [], playOrder = [];
 let currentIndex = -1, shuffle = false;
 let player = null, pitchShift = null;
 let updateInterval = null, isLoading = false;
-let pausedOffset = 0;          // 一時停止中の再開位置
-let ignoreStop = false;        // ← ★ 手動 stop 判定フラグ
+let pausedOffset = 0;
+let ignoreStop = false;      // ★ 手動停止フラグ
 
 /* ======== DOM ======== */
 const playStatus   = document.getElementById('playStatus');
@@ -90,11 +86,11 @@ const timeDisplay  = document.getElementById('timeDisplay');
 const seekSlider   = document.getElementById('seekSlider');
 const loadingLayer = document.getElementById('loadingOverlay');
 
-/* ======== 共通関数 ======== */
+/* ======== 共通 ======== */
 const showLoading = f => (isLoading = f, loadingLayer.style.display = f ? 'flex' : 'none');
 const fmt = s => isNaN(s) ? '--:--' : `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ======== プレイリスト読み込み ======== */
+/* ======== プレイリスト ======== */
 document.getElementById('fileInput').addEventListener('change', e => {
   playlist = Array.from(e.target.files);
   playOrder = playlist.map((_, i) => i);
@@ -137,11 +133,10 @@ const toggleShuffle = () => {
 seekSlider.addEventListener('input', e => {
   if (!player || !player.buffer) return;
   const dest = parseFloat(e.target.value);
-  ignoreStop = true;            // ★ 曲送り無効化
+  ignoreStop = true;            // ★ 曲送り抑制
   player.stop();
   player.start(undefined, dest);
   player._startedAt = Tone.now() - dest;
-  ignoreStop = false;           // ★ 復帰
   updateSeekBar();
 });
 
@@ -160,8 +155,8 @@ async function loadAndPlay(idx) {
   player = new Tone.Player(buf).connect(pitchShift);
   player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
 
-  player.onstop = () => {              // ★ 曲が自然終了した時だけ nextTrack
-    if (ignoreStop) return;            //   ← 手動停止時は無視
+  player.onstop = () => {         // ★ 自然終了時だけ nextTrack
+    if (ignoreStop) { ignoreStop = false; return; }
     nextTrack();
   };
 
@@ -181,13 +176,10 @@ function playAudio() {
   if (!player) return;
   Tone.start().then(() => {
     if (Tone.context.state === 'suspended') Tone.context.resume();
-
     const startAt = pausedOffset;
     ignoreStop = true;
     player.start(undefined, startAt);
     player._startedAt = Tone.now() - startAt;
-    ignoreStop = false;
-
     pausedOffset = 0;
     updateSeekBar();
     playStatus.textContent = '再生中...';
@@ -199,7 +191,6 @@ function pauseAudio() {
     pausedOffset = Tone.now() - player._startedAt;
     ignoreStop = true;
     player.stop();
-    ignoreStop = false;
     playStatus.textContent = '一時停止中';
     playStatus.style.color = 'orange';
     clearInterval(updateInterval);
@@ -209,7 +200,6 @@ function stopAudio() {
   if (player) {
     ignoreStop = true;
     player.stop();
-    ignoreStop = false;
     player.dispose();
     player = null;
   }
