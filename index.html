@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" content="text/html">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MP3 キーチェンジャー</title>
 <style>
@@ -64,12 +64,12 @@
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.4.5</span>
+    <span class="version">v1.5</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ========== 変数 & DOM ========== */
+/* ───── 変数 & DOM ───── */
 const htmlAudio   = document.getElementById('htmlAudio');
 const playStatus  = document.getElementById('playStatus');
 const timeDisplay = document.getElementById('timeDisplay');
@@ -78,21 +78,16 @@ const loadingLay  = document.getElementById('loadingOverlay');
 const metaInfo    = document.getElementById('metaInfo');
 const fileInput   = document.getElementById('fileInput');
 
-let playlist     = [];
-let currentIndex = -1;
-let shuffle      = false;
-let updateTimer  = null;
+let playlist = [], currentIndex = -1, shuffle = false, updateTimer = null;
+/* AudioNodes（後で作る） */
+let mediaSrc   = null;   // MediaElementSourceNode
+let pitchShift = null;   // Tone.PitchShift
 
-/* ========== Tone.js ノード ========== */
-const mediaSrc   = Tone.context.createMediaElementSource(htmlAudio);
-const pitchShift = new Tone.PitchShift({ pitch: 0 }).toDestination();
-mediaSrc.connect(pitchShift);
-
-/* ========== 共通 ========== */
+/* ───── 共通関数 ───── */
 const showLoading = on => loadingLay.style.display = on ? 'flex' : 'none';
 const fmt = s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ========== ファイル追加 （空配列は無視） ========== */
+/* ───── ファイル追加 ───── */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
@@ -114,76 +109,110 @@ function renderPlaylist(){
   metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
 }
 
-/* ========== ピッチ ========== */
-document.getElementById('pitchSlider').addEventListener('input',e=>{
-  const v=parseInt(e.target.value);
-  pitchShift.pitch=v;
-  document.getElementById('pitchValue').textContent=v;
+/* ───── ピッチ ───── */
+document.getElementById('pitchSlider').addEventListener('input', e=>{
+  if(pitchShift) pitchShift.pitch = parseInt(e.target.value);
+  document.getElementById('pitchValue').textContent = e.target.value;
 });
 function adjustPitch(d){
   const s=document.getElementById('pitchSlider');
-  s.value=Math.max(-12,Math.min(12,parseInt(s.value)+d));
+  s.value = Math.max(-12, Math.min(12, parseInt(s.value)+d));
   s.dispatchEvent(new Event('input'));
 }
 
-/* ========== 再生制御 ========== */
+/* ───── 再生制御 ───── */
 async function loadAndPlay(idx){
-  if(!playlist.length)return;
-  showLoading(true);stopAudio(false);
-  currentIndex=idx;renderPlaylist();
+  if(!playlist.length) return;
+  showLoading(true);
+  stopAudio(false);
 
-  htmlAudio.src=URL.createObjectURL(playlist[idx]);
-  await Tone.start();if(Tone.context.state==='suspended')await Tone.context.resume();
-  await htmlAudio.play();updateSeekBar();
+  currentIndex = idx;
+  renderPlaylist();
 
-  playStatus.textContent='再生中';playStatus.style.color='green';
+  htmlAudio.src = URL.createObjectURL(playlist[idx]);
+
+  await Tone.start();
+  if(Tone.context.state==='suspended') await Tone.context.resume();
+
+  /* ─ 新規 AudioNode を安全に作成 ─ */
+  if(!pitchShift){
+    pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
+  }
+  if(!mediaSrc){
+    try{
+      mediaSrc = Tone.context.createMediaElementSource(htmlAudio);
+      mediaSrc.connect(pitchShift);
+    }catch(err){
+      console.error('MediaElementSourceNode 作成失敗:', err);
+      showLoading(false);
+      return;
+    }
+  }
+
+  await htmlAudio.play();
+  updateSeekBar();
+
+  playStatus.textContent = '再生中';
+  playStatus.style.color = 'green';
   showLoading(false);
 }
 function playAudio(){
-  if(!htmlAudio.src)return;
-  Tone.start().then(async()=>{
-    if(Tone.context.state==='suspended')await Tone.context.resume();
+  if(!htmlAudio.src) return;
+  Tone.start().then(async ()=>{
+    if(Tone.context.state==='suspended') await Tone.context.resume();
     htmlAudio.play();
-    playStatus.textContent='再生中';playStatus.style.color='green';
+    playStatus.textContent = '再生中';
+    playStatus.style.color = 'green';
   });
 }
 function pauseAudio(){
-  if(htmlAudio.paused)return;
+  if(htmlAudio.paused) return;
   htmlAudio.pause();
-  playStatus.textContent='一時停止';playStatus.style.color='orange';
+  playStatus.textContent = '一時停止';
+  playStatus.style.color = 'orange';
 }
 function stopAudio(reset=true){
-  htmlAudio.pause();htmlAudio.currentTime=0;clearInterval(updateTimer);
-  seekSlider.value=0;timeDisplay.textContent='--:-- / --:--';
-  if(reset){playStatus.textContent='停止';playStatus.style.color='gray';}
+  htmlAudio.pause();
+  htmlAudio.currentTime = 0;
+  clearInterval(updateTimer);
+  seekSlider.value = 0;
+  timeDisplay.textContent = '--:-- / --:--';
+  if(reset){
+    playStatus.textContent = '停止';
+    playStatus.style.color = 'gray';
+  }
 }
 function nextTrack(){
-  if(!playlist.length)return;
-  const n=shuffle
-    ?(playlist.length===1?currentIndex:(()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
-    :(currentIndex+1)%playlist.length;
+  if(!playlist.length) return;
+  const n = shuffle
+    ? (playlist.length===1 ? currentIndex
+       : (()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
+    : (currentIndex+1)%playlist.length;
   loadAndPlay(n);
 }
 function toggleShuffle(){
-  shuffle=!shuffle;
-  document.getElementById('shuffleState').textContent=shuffle?'ON':'OFF';
+  shuffle = !shuffle;
+  document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
 }
-htmlAudio.addEventListener('ended',()=>nextTrack());
+htmlAudio.addEventListener('ended', ()=> nextTrack());
 
-/* ========== シークバー ========== */
-seekSlider.addEventListener('input',e=>{
-  if(!htmlAudio.duration)return;
-  htmlAudio.currentTime=parseFloat(e.target.value);
+/* ───── シークバー ───── */
+seekSlider.addEventListener('input', e=>{
+  if(!htmlAudio.duration) return;
+  htmlAudio.currentTime = parseFloat(e.target.value);
 });
 function updateSeekBar(){
   clearInterval(updateTimer);
-  if(!htmlAudio.duration)return;
-  const dur=htmlAudio.duration;seekSlider.max=dur;
-  const refresh=()=>{
-    seekSlider.value=htmlAudio.currentTime;
-    timeDisplay.textContent=`${fmt(htmlAudio.currentTime)} / ${fmt(dur)}`;
+  if(!htmlAudio.duration) return;
+  const dur = htmlAudio.duration;
+  seekSlider.max = dur;
+
+  const refresh = ()=>{
+    seekSlider.value = htmlAudio.currentTime;
+    timeDisplay.textContent = `${fmt(htmlAudio.currentTime)} / ${fmt(dur)}`;
   };
-  refresh();updateTimer=setInterval(refresh,500);
+  refresh();
+  updateTimer = setInterval(refresh, 500);
 }
   </script>
 </body>
