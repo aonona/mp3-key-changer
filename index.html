@@ -24,7 +24,6 @@
       z-index: 9999;
     }
     footer { position: fixed; bottom: 0; left: 0; right: 0; background: #f2f2f2; padding: 10px 20px; border-top: 1px solid #ccc; text-align: center; font-size: 14px; color: #666; }
-
     @media (max-width: 600px) {
       body { padding: 10px; font-size: 16px; }
       h1 { font-size: 20px; }
@@ -43,6 +42,7 @@
     <button onclick="playAudio()">再生</button>
     <button onclick="pauseAudio()">一時停止</button>
     <button onclick="stopAudio()">停止</button>
+    <button onclick="nextTrack()">次の曲へ</button>
     <button onclick="toggleShuffle()">シャッフル: <span id="shuffleState">OFF</span></button>
     <div class="status" id="playStatus">未再生</div>
   </div>
@@ -75,10 +75,12 @@
     let pitchShift = null;
     let shuffle = false;
     let isLoading = false;
+    let updateInterval = null;
 
     const playStatus = document.getElementById('playStatus');
     const timeDisplay = document.getElementById('timeDisplay');
     const loadingOverlay = document.getElementById('loadingOverlay');
+    const seekSlider = document.getElementById('seekSlider');
 
     function showLoading(show) {
       isLoading = show;
@@ -100,6 +102,30 @@
       if (pitchShift) pitchShift.pitch = parseInt(e.target.value);
     });
 
+    seekSlider.addEventListener('change', e => {
+      if (player && player.buffer && player.buffer.duration) {
+        const newTime = parseFloat(e.target.value) * player.buffer.duration;
+        player.stop();
+        player.start(undefined, newTime);
+        updateSeekBar();
+      }
+    });
+
+    function toggleShuffle() {
+      shuffle = !shuffle;
+      document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
+    }
+
+    function nextTrack() {
+      if (shuffle) {
+        const next = Math.floor(Math.random() * playlist.length);
+        loadAndPlay(next);
+      } else {
+        const nextIndex = (currentIndex + 1) % playlist.length;
+        loadAndPlay(nextIndex);
+      }
+    }
+
     function updatePitchDisplay() {
       document.getElementById('pitchValue').textContent = document.getElementById('pitchSlider').value;
     }
@@ -113,32 +139,6 @@
       if (pitchShift) pitchShift.pitch = newVal;
     }
 
-    document.getElementById('seekSlider').addEventListener('input', e => {
-      if (player && player.buffer && player.buffer.duration) {
-        const newTime = parseFloat(e.target.value) * player.buffer.duration;
-        player.seek(newTime);
-         timeDisplay.textContent = formatTime(newTime) + ' / ' + formatTime(player.buffer.duration); // 即時反映
-      }
-    });
-
-    function toggleShuffle() {
-      shuffle = !shuffle;
-      document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
-      if (shuffle) {
-        playOrder = shuffleArray(playlist.map((_, i) => i));
-      } else {
-        playOrder = playlist.map((_, i) => i);
-      }
-    }
-
-    function shuffleArray(array) {
-      for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-      }
-      return array;
-    }
-
     function renderPlaylist() {
       const list = document.getElementById('playlist');
       list.innerHTML = '';
@@ -147,9 +147,7 @@
         div.textContent = file.name;
         div.className = 'track' + (index === currentIndex ? ' selected' : '');
         div.onclick = () => {
-          playOrder = playlist.map((_, i) => i);
-          currentIndex = index;
-          loadAndPlay(currentIndex);
+          loadAndPlay(index);
         };
         list.appendChild(div);
       });
@@ -161,33 +159,18 @@
       stopAudio();
       currentIndex = index;
       renderPlaylist();
-      playStatus.textContent = '再生中...';
-      playStatus.style.color = 'green';
-
-      if (player) {
-        player.dispose();
-        player = null;
-      }
-      if (pitchShift) {
-        pitchShift.dispose();
-        pitchShift = null;
-      }
 
       const file = playlist[index];
       const arrayBuffer = await file.arrayBuffer();
       const audioBuffer = await Tone.context.decodeAudioData(arrayBuffer);
 
-      const buffer = new Tone.ToneAudioBuffer(audioBuffer);
       pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
-      player = new Tone.Player(buffer).connect(pitchShift);
+      player = new Tone.Player(audioBuffer).connect(pitchShift);
       player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
 
       player.onstop = () => {
-        playStatus.textContent = '停止中';
-        playStatus.style.color = 'gray';
-        const nextIndex = playOrder.indexOf(currentIndex) + 1;
-        if (nextIndex < playOrder.length) {
-          loadAndPlay(playOrder[nextIndex]);
+        if (!isLoading) {
+          nextTrack();
         }
       };
 
@@ -195,6 +178,8 @@
       if (Tone.context.state === 'suspended') await Tone.context.resume();
       player.start();
       updateSeekBar();
+      playStatus.textContent = '再生中...';
+      playStatus.style.color = 'green';
       showLoading(false);
     }
 
@@ -204,6 +189,7 @@
       Tone.start().then(() => {
         if (Tone.context.state === 'suspended') Tone.context.resume();
         player.start();
+        updateSeekBar();
         playStatus.textContent = '再生中...';
         playStatus.style.color = 'green';
       });
@@ -220,7 +206,9 @@
     function stopAudio() {
       if (player) {
         player.stop();
+        clearInterval(updateInterval);
         document.getElementById('seekSlider').value = 0;
+        timeDisplay.textContent = '--:-- / --:--';
         playStatus.textContent = '停止中';
         playStatus.style.color = 'gray';
         player.dispose();
@@ -234,16 +222,16 @@
 
     function updateSeekBar() {
       if (!player || !player.buffer || !player.buffer.duration) return;
-      requestAnimationFrame(() => {
+      clearInterval(updateInterval);
+      updateInterval = setInterval(() => {
         if (player && player.buffer.duration) {
-          const pos = player.toSeconds(player.now());
+          const pos = player.now() - player._startTime + player._startOffset;
           const duration = player.buffer.duration;
           const progress = pos / duration;
           document.getElementById('seekSlider').value = progress;
           timeDisplay.textContent = formatTime(pos) + ' / ' + formatTime(duration);
-          updateSeekBar();
         }
-      });
+      }, 500);
     }
 
     function formatTime(seconds) {
