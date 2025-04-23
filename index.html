@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" content="text/html">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MP3 キーチェンジャー</title>
 
@@ -64,19 +64,15 @@
     <div class="time-display" id="timeDisplay">--:-- / --:--</div>
   </div>
 
-  <!-- バックグラウンド再生用 audio -->
-  <audio id="htmlAudio" preload="auto" playsinline style="display:none"></audio>
-
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.8.2</span>
+    <span class="version">v1.7</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ─────────── 変数 & DOM ─────────── */
-const htmlAudio  = document.getElementById('htmlAudio');
+/* ───── 変数 & DOM ───── */
 const playStatus = document.getElementById('playStatus');
 const timeDisp   = document.getElementById('timeDisplay');
 const seekSlider = document.getElementById('seekSlider');
@@ -84,14 +80,14 @@ const loadingLay = document.getElementById('loadingOverlay');
 const metaInfo   = document.getElementById('metaInfo');
 const fileInput  = document.getElementById('fileInput');
 
-let playlist=[], currentIndex=-1, shuffle=false, timer=null;
-let mediaSrc=null, pitchShift=null;
+let playlist=[], currentIndex=-1, shuffle=false;
+let player=null, pitchNode=null, timer=null;
 
-/* ─────────── 共通 ─────────── */
-const showLoading = f=>loadingLay.style.display=f?'flex':'none';
-const fmt=s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+/* ───── 共通 ───── */
+const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
+const fmt = s => isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ─────────── ファイル追加 ─────────── */
+/* ───── ファイル追加 ───── */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
@@ -113,85 +109,87 @@ function renderPlaylist(){
   metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
 }
 
-/* ─────────── ピッチ変更 ─────────── */
-document.getElementById('pitchSlider').addEventListener('input',e=>{
-  if(pitchShift) pitchShift.pitch=parseInt(e.target.value);
-  document.getElementById('pitchValue').textContent=e.target.value;
+/* ───── ピッチ ───── */
+document.getElementById('pitchSlider').addEventListener('input', e=>{
+  if(pitchNode) pitchNode.pitch = parseInt(e.target.value);
+  document.getElementById('pitchValue').textContent = e.target.value;
 });
-function adjustPitch(d){
+function adjustPitch(step){
   const s=document.getElementById('pitchSlider');
-  s.value=Math.max(-12,Math.min(12,parseInt(s.value)+d));
+  s.value=Math.max(-12,Math.min(12,parseInt(s.value)+step));
   s.dispatchEvent(new Event('input'));
 }
 
-/* ─────────── AudioContext 自動復帰 ─────────── */
-function ensureAudioContext(){
-  if(Tone.context.state!=='running'){
-    Tone.context.resume().catch(()=>{});
-  }
-}
-document.addEventListener('visibilitychange', ensureAudioContext);
-htmlAudio.addEventListener('timeupdate', ensureAudioContext);
-
-/* ─────────── 再生制御 ─────────── */
+/* ───── 再生制御 ───── */
 async function loadAndPlay(idx){
   if(!playlist.length) return;
-  showLoading(true); stopAudio(false);
+  showLoading(true);
+  stopAudio(false);
 
   currentIndex=idx; renderPlaylist();
-  htmlAudio.src=URL.createObjectURL(playlist[idx]);
-
-  await Tone.start();
-  if(Tone.context.state==='suspended') await Tone.context.resume();
-
-  /* AudioNodes (最初だけ作成) */
-  if(!mediaSrc){
-    mediaSrc   = Tone.context.createMediaElementSource(htmlAudio);
-    pitchShift = new Tone.PitchShift({
-      pitch: parseInt(document.getElementById('pitchSlider').value)
-    }).toDestination();
-    mediaSrc.connect(pitchShift);
-  }
-
-  /* 通常 or エラー時にオーバーレイを閉じるリスナ */
-  const hideOverlay = ()=> showLoading(false);
-  ['playing','error','abort','stalled'].forEach(ev=>{
-    htmlAudio.addEventListener(ev, hideOverlay, { once:true });
-  });
+  const file = playlist[idx];
 
   try{
-    await htmlAudio.play();     // Promise rejection → catch
+    const arr = await file.arrayBuffer();
+    const audioBuf = await Tone.context.decodeAudioData(arr);
+
+    pitchNode ??= new Tone.PitchShift({
+      pitch: parseInt(document.getElementById('pitchSlider').value)
+    }).toDestination();
+
+    player = new Tone.Player(audioBuf).connect(pitchNode);
+    player.onstop = ()=> nextTrack();
+
+    await Tone.start();
+    if(Tone.context.state==='suspended') await Tone.context.resume();
+
+    player.start();
+    player._startedAt = Tone.now();
     updateSeekBar();
+
     playStatus.textContent='再生中';
     playStatus.style.color='green';
   }catch(err){
-    console.error('play() 失敗:', err);
+    console.error(err);
     alert('このファイルは再生できませんでした。');
   }finally{
-    showLoading(false);         // 成功でも失敗でも必ず閉じる
+    showLoading(false);
   }
 }
 function playAudio(){
-  if(!htmlAudio.src) return;
-  Tone.start().then(async()=>{
-    if(Tone.context.state==='suspended') await Tone.context.resume();
-    htmlAudio.play();
-    playStatus.textContent='再生中'; playStatus.style.color='green';
+  if(!player) return;
+  Tone.start().then(()=>{
+    if(player.state!=='started'){
+      player.start();
+      player._startedAt = Tone.now() - seekSlider.value;
+      updateSeekBar();
+      playStatus.textContent='再生中';
+      playStatus.style.color='green';
+    }
   });
 }
 function pauseAudio(){
-  htmlAudio.pause();
-  playStatus.textContent='一時停止'; playStatus.style.color='orange';
+  if(player && player.state==='started'){
+    player.stop();
+    playStatus.textContent='一時停止';
+    playStatus.style.color='orange';
+    clearInterval(timer);
+  }
 }
 function stopAudio(reset=true){
-  htmlAudio.pause(); htmlAudio.currentTime=0;
-  clearInterval(timer); seekSlider.value=0; timeDisp.textContent='--:-- / --:--';
-  if(reset){ playStatus.textContent='停止'; playStatus.style.color='gray'; }
+  if(player){ player.stop(); player.dispose(); player=null; }
+  clearInterval(timer);
+  seekSlider.value=0; timeDisp.textContent='--:-- / --:--';
+  if(reset){
+    playStatus.textContent='停止';
+    playStatus.style.color='gray';
+  }
 }
 function nextTrack(){
   if(!playlist.length) return;
   const n = shuffle
-    ? (playlist.length===1?currentIndex:(()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
+    ? (playlist.length===1 ? currentIndex
+       : (()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
     : (currentIndex+1)%playlist.length;
   loadAndPlay(n);
 }
@@ -199,24 +197,31 @@ function toggleShuffle(){
   shuffle=!shuffle;
   document.getElementById('shuffleState').textContent=shuffle?'ON':'OFF';
 }
-htmlAudio.addEventListener('ended', ()=>nextTrack());
 
-/* ─────────── シークバー ─────────── */
-seekSlider.addEventListener('input',e=>{
-  if(!htmlAudio.duration) return;
-  htmlAudio.currentTime=parseFloat(e.target.value);
+/* ───── シークバー ───── */
+seekSlider.addEventListener('input', e=>{
+  if(player && player.buffer){
+    const dest=parseFloat(e.target.value);
+    player.stop();
+    player.start(undefined,dest);
+    player._startedAt = Tone.now()-dest;
+  }
 });
 function updateSeekBar(){
   clearInterval(timer);
-  if(!htmlAudio.duration) return;
-  seekSlider.max=htmlAudio.duration;
+  if(!player||!player.buffer) return;
+  seekSlider.max = player.buffer.duration;
 
-  const refresh=()=>{
-    seekSlider.value=htmlAudio.currentTime;
-    timeDisp.textContent=`${fmt(htmlAudio.currentTime)} / ${fmt(htmlAudio.duration)}`;
+  const refresh = ()=>{
+    const pos = Tone.now() - player._startedAt;
+    seekSlider.value = Math.min(pos, player.buffer.duration);
+    timeDisp.textContent = `${fmt(pos)} / ${fmt(player.buffer.duration)}`;
   };
-  refresh(); timer=setInterval(refresh,500);
+  refresh();
+  timer=setInterval(refresh,500);
 }
+
+/* ==== END ==== */
   </script>
 </body>
 </html>
