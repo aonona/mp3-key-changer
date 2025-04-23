@@ -36,7 +36,8 @@
     //    （iOS 15+ の Safari / Chrome で動作）
   -->
 
-  <input type="file" id="fileInput" multiple accept="audio/mp3">
+  <!-- accept を audio/* に変更 -->
+  <input type="file" id="fileInput" multiple accept="audio/*">
   <div id="playlist"></div>
 
   <div class="controls">
@@ -70,7 +71,7 @@
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.4</span>
+    <span class="version">v1.4.1</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
@@ -82,13 +83,14 @@ const timeDisplay = document.getElementById('timeDisplay');
 const seekSlider  = document.getElementById('seekSlider');
 const loadingLay  = document.getElementById('loadingOverlay');
 const metaInfo    = document.getElementById('metaInfo');
+const fileInput   = document.getElementById('fileInput');
 
 let playlist      = [];
 let currentIndex  = -1;
 let shuffle       = false;
 let updateTimer   = null;
 
-/* ========== Tone.js ノード構築（１回だけ） ========== */
+/* ========== Tone.js ノード構築 ========== */
 const mediaSrc   = Tone.context.createMediaElementSource(htmlAudio);
 const pitchShift = new Tone.PitchShift({ pitch: 0 }).toDestination();
 mediaSrc.connect(pitchShift);
@@ -99,8 +101,9 @@ const fmt = s => isNaN(s) ? '--:--' :
   `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
 /* ========== プレイリスト読み込み ========== */
-document.getElementById('fileInput').addEventListener('change', e=>{
+fileInput.addEventListener('change', e=>{
   playlist = Array.from(e.target.files);
+  fileInput.value = '';                // 同じファイルを続けて選んでも変化を取れるように
   currentIndex = -1;
   renderPlaylist();
 });
@@ -136,10 +139,9 @@ async function loadAndPlay(idx){
   currentIndex = idx; renderPlaylist();
 
   htmlAudio.src = URL.createObjectURL(playlist[idx]);
-  await Tone.start();                 // iOS でも必須
+  await Tone.start();
   if(Tone.context.state === 'suspended') await Tone.context.resume();
-
-  await htmlAudio.play();             // ユーザー操作起因なので自動で再生可
+  await htmlAudio.play();
   updateSeekBar();
 
   playStatus.textContent = '再生中';
@@ -205,11 +207,6 @@ function updateSeekBar(){
   refresh();
   updateTimer = setInterval(refresh, 500);
 }
-
-/* =====  バックグラウンド再生について  =====
- * iOS Chrome/Safari は <audio> 要素を使う限り、アプリを閉じても音声を流し続けます。
- * 画面ロックや他アプリへ切り替えても再生は止まりません（ハードキー操作は不可）。
- */
   </script>
 </body>
 </html>
