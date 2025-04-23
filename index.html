@@ -68,177 +68,190 @@
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-    let playlist = [];
-    let playOrder = [];
-    let currentIndex = -1;
-    let player = null;
-    let pitchShift = null;
-    let shuffle = false;
-    let isLoading = false;
-    let updateInterval = null;
+let playlist = [];
+let playOrder = [];
+let currentIndex = -1;
+let player = null;
+let pitchShift = null;
+let shuffle = false;
+let isLoading = false;
+let updateInterval = null;
 
-    const playStatus = document.getElementById('playStatus');
-    const timeDisplay = document.getElementById('timeDisplay');
-    const loadingOverlay = document.getElementById('loadingOverlay');
-    const seekSlider = document.getElementById('seekSlider');
+const playStatus = document.getElementById('playStatus');
+const timeDisplay = document.getElementById('timeDisplay');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const seekSlider = document.getElementById('seekSlider');
 
-    function showLoading(show) {
-      isLoading = show;
-      loadingOverlay.style.display = show ? 'flex' : 'none';
-    }
+function showLoading(show) {
+  isLoading = show;
+  loadingOverlay.style.display = show ? 'flex' : 'none';
+}
 
-    document.getElementById('fileInput').addEventListener('change', (e) => {
-      playlist = Array.from(e.target.files);
-      playOrder = playlist.map((_, i) => i);
-      renderPlaylist();
-    });
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  playlist = Array.from(e.target.files);
+  playOrder = playlist.map((_, i) => i);
+  renderPlaylist();
+});
 
-    document.getElementById('volumeSlider').addEventListener('input', e => {
-      if (player) player.volume.value = Tone.gainToDb(parseFloat(e.target.value));
-    });
+document.getElementById('volumeSlider').addEventListener('input', e => {
+  if (player) player.volume.value = Tone.gainToDb(parseFloat(e.target.value));
+});
 
-    document.getElementById('pitchSlider').addEventListener('input', e => {
-      updatePitchDisplay();
-      if (pitchShift) pitchShift.pitch = parseInt(e.target.value);
-    });
+document.getElementById('pitchSlider').addEventListener('input', e => {
+  updatePitchDisplay();
+  if (pitchShift) pitchShift.pitch = parseInt(e.target.value);
+});
 
-    seekSlider.addEventListener('input', e => {
-      if (player && player.buffer && player.buffer.duration) {
-        const newTime = parseFloat(e.target.value) * player.buffer.duration;
-        player.stop();
-        player.start(undefined, newTime);
-      }
-    });
+seekSlider.addEventListener('input', e => {
+  if (player && player.buffer && player.buffer.duration) {
+    const newTime = parseFloat(e.target.value);
+    player.stop();
+    player.start(undefined, newTime);
+  }
+});
 
-    function toggleShuffle() {
-      shuffle = !shuffle;
-      document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
-    }
+function toggleShuffle() {
+  shuffle = !shuffle;
+  document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
+}
 
-    function nextTrack() {
-      if (shuffle) {
-        let next;
-        do {
-          next = Math.floor(Math.random() * playlist.length);
-        } while (next === currentIndex && playlist.length > 1);
-        loadAndPlay(next);
-      } else {
-        const nextIndex = (currentIndex + 1) % playlist.length;
-        loadAndPlay(nextIndex);
-      }
-    }
+function nextTrack() {
+  if (shuffle) {
+    let next;
+    do {
+      next = Math.floor(Math.random() * playlist.length);
+    } while (next === currentIndex && playlist.length > 1);
+    loadAndPlay(next);
+  } else {
+    const nextIndex = (currentIndex + 1) % playlist.length;
+    loadAndPlay(nextIndex);
+  }
+}
 
-    function updatePitchDisplay() {
-      document.getElementById('pitchValue').textContent = document.getElementById('pitchSlider').value;
-    }
+function updatePitchDisplay() {
+  document.getElementById('pitchValue').textContent = document.getElementById('pitchSlider').value;
+}
 
-    function adjustPitch(amount) {
-      const slider = document.getElementById('pitchSlider');
-      let newVal = parseInt(slider.value) + amount;
-      newVal = Math.max(-12, Math.min(12, newVal));
-      slider.value = newVal;
-      updatePitchDisplay();
-      if (pitchShift) pitchShift.pitch = newVal;
-    }
+function adjustPitch(amount) {
+  const slider = document.getElementById('pitchSlider');
+  let newVal = parseInt(slider.value) + amount;
+  newVal = Math.max(-12, Math.min(12, newVal));
+  slider.value = newVal;
+  updatePitchDisplay();
+  if (pitchShift) pitchShift.pitch = newVal;
+}
 
-    function renderPlaylist() {
-      const list = document.getElementById('playlist');
-      list.innerHTML = '';
-      playlist.forEach((file, index) => {
-        const div = document.createElement('div');
-        div.textContent = file.name;
-        div.className = 'track' + (index === currentIndex ? ' selected' : '');
-        div.onclick = () => {
-          loadAndPlay(index);
-        };
-        list.appendChild(div);
-      });
-    }
+function renderPlaylist() {
+  const list = document.getElementById('playlist');
+  list.innerHTML = '';
+  playlist.forEach((file, index) => {
+    const div = document.createElement('div');
+    div.textContent = file.name;
+    div.className = 'track' + (index === currentIndex ? ' selected' : '');
+    div.onclick = () => {
+      loadAndPlay(index);
+    };
+    list.appendChild(div);
+  });
+}
 
-    async function loadAndPlay(index) {
-      if (isLoading) return;
-      showLoading(true);
-      stopAudio();
-      currentIndex = index;
-      renderPlaylist();
+async function loadAndPlay(index) {
+  if (isLoading) return;
+  showLoading(true);
+  stopAudio();
+  currentIndex = index;
+  renderPlaylist();
 
-      const file = playlist[index];
-      const arrayBuffer = await file.arrayBuffer();
-      const audioBuffer = await Tone.context.decodeAudioData(arrayBuffer);
+  const file = playlist[index];
+  const arrayBuffer = await file.arrayBuffer();
+  const audioBuffer = await Tone.context.decodeAudioData(arrayBuffer);
 
-      pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
-      player = new Tone.Player(audioBuffer).connect(pitchShift);
-      player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
+  pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
+  player = new Tone.Player(audioBuffer).connect(pitchShift);
+  player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
 
-      player.onstop = () => {
-        if (!isLoading) nextTrack();
-      };
+  player.onstop = () => {
+    if (!isLoading) nextTrack();
+  };
 
-      await Tone.start();
-      if (Tone.context.state === 'suspended') await Tone.context.resume();
-      player.start();
-      updateSeekBar();
-      playStatus.textContent = '再生中...';
-      playStatus.style.color = 'green';
-      showLoading(false);
-    }
+  await Tone.start();
+  if (Tone.context.state === 'suspended') await Tone.context.resume();
+  player.start();
+  updateSeekBar();
+  playStatus.textContent = '再生中...';
+  playStatus.style.color = 'green';
+  showLoading(false);
+}
 
-    function playAudio() {
-      if (isLoading || !player) return;
-      Tone.start().then(() => {
-        if (Tone.context.state === 'suspended') Tone.context.resume();
-        player.start();
-        updateSeekBar();
-        playStatus.textContent = '再生中...';
-        playStatus.style.color = 'green';
-      });
-    }
+function playAudio() {
+  if (isLoading || !player) return;
+  Tone.start().then(() => {
+    if (Tone.context.state === 'suspended') Tone.context.resume();
+    player.start();
+    updateSeekBar();
+    playStatus.textContent = '再生中...';
+    playStatus.style.color = 'green';
+  });
+}
 
-    function pauseAudio() {
-      if (player && player.state === 'started') {
-        player.stop();
-        playStatus.textContent = '一時停止中';
-        playStatus.style.color = 'orange';
-      }
-    }
+function pauseAudio() {
+  if (player && player.state === 'started') {
+    player.stop();
+    playStatus.textContent = '一時停止中';
+    playStatus.style.color = 'orange';
+  }
+}
 
-    function stopAudio() {
-      if (player) {
-        player.stop();
-        clearInterval(updateInterval);
-        seekSlider.value = 0;
-        timeDisplay.textContent = '--:-- / --:--';
-        playStatus.textContent = '停止中';
-        playStatus.style.color = 'gray';
-        player.dispose();
-        player = null;
-      }
-      if (pitchShift) {
-        pitchShift.dispose();
-        pitchShift = null;
-      }
-    }
+function stopAudio() {
+  if (player) {
+    player.stop();
+    clearInterval(updateInterval);
+    seekSlider.value = 0;
+    seekSlider.max = 1;
+    timeDisplay.textContent = '--:-- / --:--';
+    playStatus.textContent = '停止中';
+    playStatus.style.color = 'gray';
+    player.dispose();
+    player = null;
+  }
+  if (pitchShift) {
+    pitchShift.dispose();
+    pitchShift = null;
+  }
+}
 
-    function updateSeekBar() {
-      if (!player || !player.buffer || !player.buffer.duration) return;
+function updateSeekBar() {
+  if (!player || !player.buffer || !player.buffer.duration) return;
+
+  clearInterval(updateInterval);
+
+  seekSlider.max = player.buffer.duration;
+
+  updateInterval = setInterval(() => {
+    const currentTime = Tone.now() - player.startTime;
+    const duration = player.buffer.duration;
+
+    if (currentTime >= duration) {
       clearInterval(updateInterval);
-      updateInterval = setInterval(() => {
-        const progress = player.progress;
-        const duration = player.buffer.duration;
-        const currentTime = progress * duration;
-        if (!isNaN(currentTime) && !isNaN(duration)) {
-          seekSlider.value = progress;
-          timeDisplay.textContent = formatTime(currentTime) + ' / ' + formatTime(duration);
-        }
-      }, 500);
+      seekSlider.value = duration;
+      timeDisplay.textContent = formatTime(duration) + ' / ' + formatTime(duration);
+      return;
     }
 
-    function formatTime(seconds) {
-      if (isNaN(seconds)) return '--:--';
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+    if (!isNaN(currentTime) && !isNaN(duration)) {
+      seekSlider.value = currentTime;
+      timeDisplay.textContent = formatTime(currentTime) + ' / ' + formatTime(duration);
     }
+  }, 500);
+}
+
+function formatTime(seconds) {
+  if (isNaN(seconds)) return '--:--';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+}
+
   </script>
 </body>
 </html>
