@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" content="text/html" />
+<meta charset="UTF-8" content="text/html">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MP3 キーチェンジャー</title>
 <style>
   body{font-family:sans-serif;margin:0;padding:20px 20px 70px;}
   #playlist{margin-top:10px;max-height:35vh;overflow:auto;border:1px solid #ccc;padding:4px;}
-  .track{cursor:pointer;margin-bottom:5px;}
+  .track{cursor:pointer;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+         padding:2px 4px;border-bottom:1px solid #eee;}
   .track.selected{font-weight:bold;color:blue;}
   .controls,.sliders{margin-top:20px;}
   input[type=range]{width:100%;}
@@ -29,7 +30,7 @@
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
 
-  <!--  Media Session API を使えばロック画面操作も可能です（iOS15+）-->
+  <!-- Media Session API を使えばロック画面操作も可能です（iOS15+） -->
   <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
   <div id="playlist"></div>
 
@@ -63,7 +64,7 @@
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.4.3</span>
+    <span class="version">v1.4.5</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
@@ -91,11 +92,10 @@ mediaSrc.connect(pitchShift);
 const showLoading = on => loadingLay.style.display = on ? 'flex' : 'none';
 const fmt = s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ========== ファイル追加（空配列スキップ） ========== */
+/* ========== ファイル追加 （空配列は無視） ========== */
 fileInput.addEventListener('change', e=>{
-  if(!e.target.files.length) return;          // ★ 追加
-  const added = Array.from(e.target.files);
-  added.forEach(f=>{
+  if(!e.target.files.length){ fileInput.value=''; return; }
+  Array.from(e.target.files).forEach(f=>{
     if(!playlist.some(p=>p.name===f.name)) playlist.push(f);
   });
   fileInput.value='';
