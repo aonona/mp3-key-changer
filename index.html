@@ -6,7 +6,7 @@
 <title>MP3 キーチェンジャー</title>
 <style>
   body{font-family:sans-serif;margin:0;padding:20px 20px 70px;}
-  #playlist{margin-top:10px;}
+  #playlist{margin-top:10px;max-height:35vh;overflow:auto;border:1px solid #ccc;padding:4px;}
   .track{cursor:pointer;margin-bottom:5px;}
   .track.selected{font-weight:bold;color:blue;}
   .controls,.sliders{margin-top:20px;}
@@ -29,12 +29,8 @@
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
 
-  <!--
-    ★ Media Session API を使えばロック画面／イヤホンからの
-       再生・一時停止・シーク操作も可能です（iOS 15+ Safari/Chrome）。
-  -->
-
- <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
+  <!--  Media Session API を使えばロック画面操作も可能です（iOS15+）-->
+  <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
   <div id="playlist"></div>
 
   <div class="controls">
@@ -62,13 +58,12 @@
     <div class="time-display" id="timeDisplay">--:-- / --:--</div>
   </div>
 
-  <!-- バックグラウンド再生用 audio -->
   <audio id="htmlAudio" preload="auto" style="display:none"></audio>
 
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.4.2</span>
+    <span class="version">v1.4.3</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
@@ -87,7 +82,7 @@ let currentIndex = -1;
 let shuffle      = false;
 let updateTimer  = null;
 
-/* ========== Tone.js ノード構築 ========== */
+/* ========== Tone.js ノード ========== */
 const mediaSrc   = Tone.context.createMediaElementSource(htmlAudio);
 const pitchShift = new Tone.PitchShift({ pitch: 0 }).toDestination();
 mediaSrc.connect(pitchShift);
@@ -96,13 +91,14 @@ mediaSrc.connect(pitchShift);
 const showLoading = on => loadingLay.style.display = on ? 'flex' : 'none';
 const fmt = s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ========== ファイル追加（上書き→追加に変更） ========== */
+/* ========== ファイル追加（空配列スキップ） ========== */
 fileInput.addEventListener('change', e=>{
+  if(!e.target.files.length) return;          // ★ 追加
   const added = Array.from(e.target.files);
   added.forEach(f=>{
-    if(!playlist.some(p=>p.name===f.name)) playlist.push(f);  // 重複はスキップ
+    if(!playlist.some(p=>p.name===f.name)) playlist.push(f);
   });
-  fileInput.value='';      // 同じファイル連続選択可
+  fileInput.value='';
   renderPlaylist();
 });
 function renderPlaylist(){
