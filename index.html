@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>MP3 キーチェンジャー</title>
 
 <style>
@@ -29,6 +31,24 @@
     body{padding:10px 10px 70px;}
     button{font-size:16px;padding:10px;width:100%;margin-bottom:10px;}
     .inline-label{flex-direction:column;align-items:flex-start;}
+  }
+  
+  .hidden-video {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0.01;
+    pointer-events: none;
+  }
+  
+  .status-message {
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-top: 8px;
+    border-radius: 4px;
+    background: #f2f2f2;
+    color: #666;
+    display: none;
   }
 </style>
 </head>
@@ -62,23 +82,25 @@
     </label>
 
     <div class="time-display" id="timeDisplay">--:-- / --:--</div>
+    <div class="status-message" id="statusMessage"></div>
   </div>
 
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.8</span>
+    <span class="version">v2.0 iOS18専用</span>
   </footer>
 
-  <!-- ============= 背景再生を支える隠し audio ============= -->
-  <!-- (1) Safari・Chrome 共通: Web Audio の出力をここに流し込み AudioSession を確立 -->
-  <audio id="bgHolder" muted playsinline style="display:none"></audio>
-
-  <!-- (2) Chrome/iOS 用: 無音ループで AudioSession を維持（必須ではないが安定度向上） -->
-  <audio id="keepAwake"
-         src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAwCAAH/////8AAABhTEFNRTMuOTlyBLkAAAAAAAAAAAACAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
-         loop
-         style="display:none"></audio>
+  <!-- ============= バックグラウンド再生支援要素 ============= -->
+  <!-- Safari・Chrome 共通: Web Audio の出力をここに流し込み AudioSession を確立 -->
+  <audio id="bgHolder" preload="auto" playsinline></audio>
+  
+  <!-- iOS向け: バックグラウンド再生を維持するための無音のビデオ要素 -->
+  <video id="silentVideo" class="hidden-video" playsInline loop muted></video>
+  
+  <!-- iOS向け: バックグラウンド再生のためのダミー要素 -->
+  <audio id="keepAwake" loop playsinline preload="auto"></audio>
+  <audio id="unlockAudio" preload="auto" loop playsinline></audio>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
@@ -91,195 +113,332 @@ const metaInfo   = document.getElementById('metaInfo');
 const fileInput  = document.getElementById('fileInput');
 const bgHolder   = document.getElementById('bgHolder');
 const keepAwake  = document.getElementById('keepAwake');
+const unlockAudio = document.getElementById('unlockAudio');
+const silentVideo = document.getElementById('silentVideo');
+const statusMsg  = document.getElementById('statusMessage');
 
 let playlist=[], currentIndex=-1, shuffle=false;
 let player=null, pitchNode=null, timer=null;
+let mediaSessionActive = false;
+let audioContextUnlocked = false;
+let lastInteractionTime = 0;
+let backgroundWatchdog = null;
+let iOSVersion = 18; // iOS 18.6を想定
 
 /* ───────── 共通関数 ───────── */
 const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
 const fmt = s => isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+const showStatus = (msg, duration = 3000) => {
+  statusMsg.textContent = msg;
+  statusMsg.style.display = 'block';
+  setTimeout(() => { statusMsg.style.display = 'none'; }, duration);
+};
 
-/* ───────── ファイル追加 ───────── */
-fileInput.addEventListener('change', e=>{
-  if(!e.target.files.length){ fileInput.value=''; return; }
-  Array.from(e.target.files).forEach(f=>{
-    if(!playlist.some(p=>p.name===f.name)) playlist.push(f);
-  });
-  fileInput.value='';
-  renderPlaylist();
-});
-function renderPlaylist(){
-  const list=document.getElementById('playlist');
-  list.innerHTML='';
-  playlist.forEach((f,i)=>{
-    const div=document.createElement('div');
-    div.textContent=f.name;
-    div.className='track'+(i===currentIndex?' selected':'');
-    div.onclick=()=>loadAndPlay(i);
-    list.appendChild(div);
-  });
-  metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
+/* ───────── iOS バージョン検出 ───────── */
+function detectiOSVersion() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) {
+    const matches = ua.match(/OS (\d+)_(\d+)_?(\d+)?/);
+    if (matches) {
+      iOSVersion = parseInt(matches[1], 10);
+      showStatus(`iOS ${iOSVersion} 検出`, 2000);
+    }
+  }
 }
 
-/* ───────── ピッチ変更 ───────── */
-document.getElementById('pitchSlider').addEventListener('input', e=>{
-  if(pitchNode) pitchNode.pitch = parseInt(e.target.value);
-  document.getElementById('pitchValue').textContent = e.target.value;
+/* ───────── 初期化 ───────── */
+// 検出・初期化
+window.addEventListener('DOMContentLoaded', () => {
+  detectiOSVersion();
+  setupAudioEnvironment();
+  
+  // iOS 18の場合は、特別な最適化を適用
+  if (iOSVersion >= 18) {
+    setupiOS18Optimizations();
+  }
 });
-function adjustPitch(step){
-  const s=document.getElementById('pitchSlider');
-  s.value=Math.max(-12,Math.min(12,parseInt(s.value)+step));
-  s.dispatchEvent(new Event('input'));
-}
 
-/* ───────── 再生制御メイン ───────── */
-async function loadAndPlay(idx){
-  if(!playlist.length) return;
-
-  showLoading(true);
-  stopAudio(false);
-
-  currentIndex=idx; renderPlaylist();
-  const file = playlist[idx];
-
-  try{
-    /* -------- データ読み込み -------- */
-    const arr = await file.arrayBuffer();
-    const audioBuf = await Tone.context.decodeAudioData(arr);
-
-    /* -------- WebAudio ノード構築 -------- */
-    pitchNode ??= new Tone.PitchShift({
-      pitch: parseInt(document.getElementById('pitchSlider').value)
-    }).toDestination();
-
-    /* MediaStreamDestination で <audio> へブリッジ */
-    const dest = Tone.context.createMediaStreamDestination();
-    player = new Tone.Player(audioBuf)
-                .connect(pitchNode)
-                .connect(dest);
-    bgHolder.srcObject = dest.stream;   // Safari: AudioSession を認識
-    bgHolder.play().catch(()=>{});      // user-gesture 後なので許可される
-
-    /* 曲終了時のハンドラ */
-    player.onstop = ()=> nextTrack();
-
-    /* -------- 再生開始 -------- */
+async function setupAudioEnvironment() {
+  try {
+    // Tone.jsのコンテキスト設定
+    Tone.setContext(new Tone.Context({
+      latencyHint: 'playback',
+      lookAhead: 0.2
+    }));
+    
+    // AudioContextを準備
     await Tone.start();
-    if(Tone.context.state==='suspended') await Tone.context.resume();
+    
+    // 無音ファイルの生成
+    const silentAudioBlob = generateSilentAudio();
+    const silentAudioURL = URL.createObjectURL(silentAudioBlob);
+    
+    // 無音のビデオファイルのURL
+    const silentVideoURL = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAxptZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE0MiByMjQ3OSBkZDc5YTYxIC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAxNCAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAwZYiEAD//8W5vIGNvcHlyaWdodCwgMjAxNC0yMDE5LCBTaWhhbiBDaGVuZwAAAClBgIGIgQD/gIEAAACVZYCAgRBU8BEAYP+AAAAAEEXwBABg/4AAAAARAREAEAGT/gAAAAARAAAADYBAQAAAACFAwDHCIHAhiEAQIAhAACDQQGFAUAAYQkAAIEIBYCEQAAyBCYABDAQcAgEAAQwAghgABDIIBABAMAICIQAAhEICQEIhAACEQgJAQiEYIBEIQQAhAIBAQiAYEBAghg0QQQCEAg4BAIQQCgYxXL69/X+jW0n+dyPe3nyjqMN3zHnQYV3afrCx9LxpXgAXtzDJ//Zc8nmQAAVAEVU8ReAANNjBVVVVVUu0zMxMzMzMzMzMzMzIu7u7u7u7u7u7u7u7gAAAAAIqqqqqqqqqqqqqqqAEVVVVVVVVVVVVVVVUAIqqqqqqqqqqqqqqqoBFVVVVVVVVVVVVVVVQAiqqqqqqqqqqqqqqqgBFVVVVVVVVVVVVVVVUAIqqqqqqqqqqqqqqqoBFVVVVVVVCB80AAYvfxAABi7+gAAF34j/wII2QfNQQEcWeBAlNqhFMH3s713tMTGA23FWxQQQOEAAArAZLFIBAkfLgAAoB5Kq7yTQAAAAATBUiCMBAAjFsAABMwTgKZmqmZqpmaqZmqmZqpmaqZmqmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmABMHsBMwTgKZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmAqqqqqqqqqqqqqqqr5Vh25a12YUFMABMFQQKqqqqqqqqqqqqqqr/7qC5oSAHNQHFZRUVFRUWAAyBERCIAcRZIQJDjQVQRFRUVFFRUVGRUYVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRYVGFRUVAAAAHHBWJUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFhUYVF//uQZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAETEFMRTMuOTkuNVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=';
+    
+    // 無音要素の設定
+    keepAwake.src = silentAudioURL;
+    unlockAudio.src = silentAudioURL;
+    silentVideo.src = silentVideoURL;
+    
+    // 無限ループ設定
+    keepAwake.loop = true;
+    unlockAudio.loop = true;
+    silentVideo.loop = true;
+    
+    // 初期アンロック処理
+    await unlockAudioContext();
+    
+    audioContextUnlocked = true;
+    showStatus('オーディオ環境: 準備完了', 1500);
+  } catch (e) {
+    console.error('オーディオ環境の初期化エラー:', e);
+    showStatus('警告: オーディオ環境の初期化に失敗', 3000);
+  }
+}
 
-    startKeepAwake();                   // Chrome/iOS 安定化（無音ループ）
-    player.start();
-    player._startedAt = Tone.now();
-    updateSeekBar();
+// iOS 18向け特別最適化
+function setupiOS18Optimizations() {
+  // MediaSessionリスナーの設定
+  if ('mediaSession' in navigator) {
+    // 定期的なMediaSession状態更新
+    setInterval(() => {
+      if (player && player.state === 'started') {
+        updateMediaSessionState('playing');
+      }
+    }, 5000);
+  }
+  
+  // 画面の向きが変わったときにオーディオコンテキストを再開
+  window.addEventListener('orientationchange', () => {
+    if (Tone.context.state !== 'running') {
+      Tone.context.resume().catch(() => {});
+    }
+    startKeepAlive();
+  });
+  
+  // ネットワーク接続状態の変更時にオーディオを維持
+  window.addEventListener('online', startKeepAlive);
+  window.addEventListener('offline', startKeepAlive);
+  
+  // ユーザージェスチャーが発生したときの処理
+  document.addEventListener('touchstart', () => {
+    lastInteractionTime = Date.now();
+    startKeepAlive();
+  });
+  
+  document.addEventListener('click', () => {
+    lastInteractionTime = Date.now();
+    startKeepAlive();
+  });
+  
+  // iOS 18向けPictureInPicture代替処理
+  setupPictureInPictureAlternative();
+}
 
-    /* Media Session API でロック画面情報 */
-    if ('mediaSession' in navigator){
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: file.name,
-        artist: 'MP3 キーチェンジャー',
-        album: '',
-        artwork:[]
+// iOS 18向けバックグラウンド再生代替処理
+function setupPictureInPictureAlternative() {
+  try {
+    // ビデオ要素を再生しておく
+    silentVideo.play().catch(() => {});
+    
+    // バックグラウンド監視の設定
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // バックグラウンドに行ったときの処理
+        console.log('バックグラウンドへ移行');
+        
+        // 一度オーディオをすべて再開
+        startKeepAlive();
+        
+        // バックグラウンド監視開始
+        startBackgroundWatchdog();
+      } else {
+        // 前面復帰時の処理
+        console.log('前面へ復帰');
+        stopBackgroundWatchdog();
+        
+        if (Tone.context.state !== 'running') {
+          Tone.context.resume().catch(() => {});
+        }
+        
+        // 再生状態の回復
+        if (player && player.state !== 'started' && playStatus.textContent === '再生中') {
+          playAudio();
+        }
+      }
+    });
+  } catch (e) {
+    console.error('PiP代替処理エラー:', e);
+  }
+}
+
+// バックグラウンド監視を開始
+function startBackgroundWatchdog() {
+  if (backgroundWatchdog) {
+    clearInterval(backgroundWatchdog);
+  }
+  
+  // 5秒ごとにバックグラウンド維持処理を実行
+  backgroundWatchdog = setInterval(() => {
+    if (document.hidden && player && player.state === 'started') {
+      // iOS 18向け追加のバックグラウンド維持処理
+      startKeepAlive();
+      
+      // MediaSession 再アクティブ化
+      updateMediaSessionState('playing');
+      
+      // iOS自動ウェイクアップ試行
+      triggerIOSWakeup();
+    }
+  }, 5000);
+}
+
+// バックグラウンド監視を停止
+function stopBackgroundWatchdog() {
+  if (backgroundWatchdog) {
+    clearInterval(backgroundWatchdog);
+    backgroundWatchdog = null;
+  }
+}
+
+// iOS自動ウェイクアップをトリガー
+function triggerIOSWakeup() {
+  try {
+    // 無音オシレーター作成
+    const ctx = Tone.context.rawContext;
+    const oscillator = ctx.createOscillator();
+    oscillator.frequency.value = 1;
+    
+    const gain = ctx.createGain();
+    gain.gain.value = 0.001;
+    
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.1);
+    
+    // MediaSession状態を保持
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
+    
+    // 無音ビデオ要素を再生
+    silentVideo.play().catch(() => {});
+    
+    // 無音オーディオ要素を再生
+    const playPromise = keepAwake.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        unlockAudio.play().catch(() => {});
       });
     }
-
-    playStatus.textContent='再生中';
-    playStatus.style.color='green';
-  }catch(err){
-    console.error(err);
-    alert('このファイルは再生できませんでした。');
-  }finally{
-    showLoading(false);
+  } catch (e) {
+    console.warn('ウェイクアップ試行エラー:', e);
   }
 }
-function playAudio(){
-  if(!player) return;
-  Tone.start().then(()=>{
-    if(player.state!=='started'){
-      player.start();
-      player._startedAt = Tone.now() - seekSlider.value;
-      updateSeekBar();
-      startKeepAwake();
-      playStatus.textContent='再生中';
-      playStatus.style.color='green';
+
+// すべてのキープアライブメカニズムを開始
+function startKeepAlive() {
+  try {
+    // 1. 無音ビデオ再生
+    silentVideo.play().catch(() => {});
+    
+    // 2. 複数の無音オーディオ再生
+    keepAwake.play().catch(() => {
+      unlockAudio.play().catch(() => {});
+    });
+    
+    // 3. AudioContextを確認・再開
+    if (Tone.context.state !== 'running') {
+      Tone.context.resume().catch(() => {});
     }
-  });
-}
-function pauseAudio(){
-  if(player && player.state==='started'){
-    player.stop();
-    playStatus.textContent='一時停止';
-    playStatus.style.color='orange';
-    clearInterval(timer);
-    keepAwake.pause();
-  }
-}
-function stopAudio(reset=true){
-  if(player){ player.stop(); player.dispose(); player=null; }
-  clearInterval(timer);
-  seekSlider.value=0; timeDisp.textContent='--:-- / --:--';
-  if(reset){
-    playStatus.textContent='停止';
-    playStatus.style.color='gray';
-  }
-  keepAwake.pause();
-}
-function nextTrack(){
-  if(!playlist.length) return;
-  const n = shuffle
-    ? (playlist.length===1 ? currentIndex
-       : (()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
-    : (currentIndex+1)%playlist.length;
-  loadAndPlay(n);
-}
-function toggleShuffle(){
-  shuffle=!shuffle;
-  document.getElementById('shuffleState').textContent=shuffle?'ON':'OFF';
-}
-
-/* ───────── シークバー ───────── */
-seekSlider.addEventListener('input', e=>{
-  if(player && player.buffer){
-    const dest=parseFloat(e.target.value);
-    player.stop();
-    player.start(undefined,dest);
-    player._startedAt = Tone.now()-dest;
-  }
-});
-function updateSeekBar(){
-  clearInterval(timer);
-  if(!player||!player.buffer) return;
-  seekSlider.max = player.buffer.duration;
-
-  const refresh = ()=>{
-    const pos = Tone.now() - player._startedAt;
-    seekSlider.value = Math.min(pos, player.buffer.duration);
-    timeDisp.textContent = `${fmt(pos)} / ${fmt(player.buffer.duration)}`;
-  };
-  refresh();
-  timer=setInterval(refresh,500);
-}
-
-/* ───────── 背景⇄前面 切替処理 ───────── */
-document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden){
-    /* iOS Chrome: back → WebAudio が止まる前に keepAwake を継続 */
-    startKeepAwake();
-  }else{
-    /* 前面復帰時、AudioContext が interrupted なら再開 */
-    if(Tone.context.state!=='running'){
-      Tone.context.resume().catch(()=>{});
+    
+    // 4. リソース解放防止のための小さな音を鳴らす
+    const ctx = Tone.context.rawContext;
+    const oscillator = ctx.createOscillator();
+    oscillator.frequency.value = 1;
+    
+    const gain = ctx.createGain();
+    gain.gain.value = 0.001;
+    
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.01);
+    
+    // 5. MediaSession状態を更新
+    if (player && player.state === 'started') {
+      updateMediaSessionState('playing');
     }
+  } catch (e) {
+    console.warn('キープアライブエラー:', e);
   }
-});
-
-/* ───────── 付加ユーティリティ ───────── */
-function startKeepAwake(){
-  /* Safari では無音ループは無視されるが害はない。
-     Chrome/iOS ではこれがあると WebAudio が止まりにくい。*/
-  keepAwake.play().catch(()=>{});
 }
 
-/* =============== END =============== */
-  </script>
-</body>
-</html>
+// オーディオコンテキストのアンロック処理
+async function unlockAudioContext() {
+  try {
+    // AudioContextの開始
+    await Tone.start();
+    
+    // 各オーディオ要素の一時的な再生
+    await Promise.all([
+      playAndStop(bgHolder),
+      playAndStop(keepAwake),
+      playAndStop(unlockAudio),
+      playAndStop(silentVideo)
+    ]);
+    
+    // Tone.jsコンテキストの再開
+    if (Tone.context.state !== 'running') {
+      await Tone.context.resume();
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('オーディオアンロックエラー:', e);
+    return false;
+  }
+}
+
+// 一時的な再生と停止
+async function playAndStop(element) {
+  try {
+    element.muted = true;
+    await element.play();
+    
+    // 少し待機してからミュートを解除
+    setTimeout(() => {
+      element.muted = false;
+      
+      // videoとkeepAwake以外は一時停止
+      if (element !== silentVideo && element !== keepAwake) {
+        element.pause();
+      }
+    }, 50);
+    
+    return true;
+  } catch (e) {
+    console.warn(`再生エラー (${element.id}):`, e);
+    return false;
+  }
+}
+
+  // 無音オーディオブロブの生成
+function generateSilentAudio() {
+  // 簡易的な無音WAVファイルのバイナリデータ
+  const silentWavBytes = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00, 
+    0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, 
+    0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 
+    0x44, 0xAC, 0x00, 0x00, 0x88, 0x58, 0x01, 0x00, 
+    0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00
+  ]);
+  
+  // Blob作成
+  return new Blob([silentWavBytes], { type: 'audio/wav' });
+}
