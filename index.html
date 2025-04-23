@@ -35,7 +35,7 @@
 </head>
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
-  <h1>クライアントサイド MP3 キーチェンジャー1.1</h1>
+  <h1>クライアントサイド MP3 キーチェンジャー1.2</h1>
   <input type="file" id="fileInput" multiple accept="audio/mp3">
   <div id="playlist"></div>
   <div class="controls">
@@ -107,7 +107,6 @@
         const newTime = parseFloat(e.target.value) * player.buffer.duration;
         player.stop();
         player.start(undefined, newTime);
-        updateSeekBar();
       }
     });
 
@@ -168,13 +167,11 @@
       const audioBuffer = await Tone.context.decodeAudioData(arrayBuffer);
 
       pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
-      player = new Tone.Player({ url: audioBuffer, autostart: false }).connect(pitchShift);
+      player = new Tone.Player(audioBuffer).connect(pitchShift);
       player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
 
       player.onstop = () => {
-        if (!isLoading) {
-          nextTrack();
-        }
+        if (!isLoading) nextTrack();
       };
 
       await Tone.start();
@@ -225,14 +222,13 @@
     function updateSeekBar() {
       if (!player || !player.buffer || !player.buffer.duration) return;
       clearInterval(updateInterval);
-      const duration = player.buffer.duration;
       updateInterval = setInterval(() => {
-        const now = Tone.now();
-        const elapsed = player._startTime ? now - player._startTime + (player._startOffset || 0) : 0;
-        const progress = Math.min(elapsed / duration, 1);
-        if (!isNaN(progress)) {
+        const progress = player.progress;
+        const duration = player.buffer.duration;
+        const currentTime = progress * duration;
+        if (!isNaN(currentTime) && !isNaN(duration)) {
           seekSlider.value = progress;
-          timeDisplay.textContent = formatTime(elapsed) + ' / ' + formatTime(duration);
+          timeDisplay.textContent = formatTime(currentTime) + ' / ' + formatTime(duration);
         }
       }, 500);
     }
