@@ -17,13 +17,15 @@
     .key-control-buttons { display: flex; gap: 8px; align-items: center; }
     .time-display { margin-top: 10px; font-size: 14px; color: #333; }
     .loading-overlay {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed; inset: 0;
       background: rgba(255,255,255,0.8); display: none;
       justify-content: center; align-items: center;
       font-size: 20px; font-weight: bold; color: #333;
       z-index: 9999;
     }
-    footer { position: fixed; bottom: 0; left: 0; right: 0; background: #f2f2f2; padding: 10px 20px; border-top: 1px solid #ccc; text-align: center; font-size: 14px; color: #666; }
+    footer { position: fixed; inset-block-end: 0; inset-inline: 0;
+      background: #f2f2f2; padding: 10px 20px; border-top: 1px solid #ccc;
+      text-align: center; font-size: 14px; color: #666; }
     @media (max-width: 600px) {
       body { padding: 10px; font-size: 16px; }
       h1 { font-size: 20px; }
@@ -35,7 +37,7 @@
 </head>
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
-  <h1>クライアントサイド MP3 キーチェンジャー1.4</h1>
+  <h1>クライアントサイド MP3 キーチェンジャー1.5</h1>
 
   <input type="file" id="fileInput" multiple accept="audio/mp3">
   <div id="playlist"></div>
@@ -72,58 +74,46 @@
 
   <footer>クライアントサイドで安全に動作するMP3キーチェンジャー（β版）</footer>
 
-  <!-- Tone.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* -------------------- 変数 -------------------- */
-let playlist = [];
-let currentIndex = -1;
-let playOrder = [];
-let shuffle = false;
-let player = null;
-let pitchShift = null;
-let updateInterval = null;
-let isLoading = false;
+/* ======== グローバル ======== */
+let playlist = [], playOrder = [];
+let currentIndex = -1, shuffle = false;
+let player = null, pitchShift = null;
+let updateInterval = null, isLoading = false;
 let pausedOffset = 0;          // 一時停止中の再開位置
+let ignoreStop = false;        // ← ★ 手動 stop 判定フラグ
 
-/* -------------------- DOM -------------------- */
+/* ======== DOM ======== */
 const playStatus   = document.getElementById('playStatus');
 const timeDisplay  = document.getElementById('timeDisplay');
-const loadingLayer = document.getElementById('loadingOverlay');
 const seekSlider   = document.getElementById('seekSlider');
+const loadingLayer = document.getElementById('loadingOverlay');
 
-/* -------------------- 共通 UI -------------------- */
-function showLoading(on) {
-  isLoading = on;
-  loadingLayer.style.display = on ? 'flex' : 'none';
-}
-function formatTime(sec) {
-  if (isNaN(sec)) return '--:--';
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
-  const s = Math.floor(sec % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
+/* ======== 共通関数 ======== */
+const showLoading = f => (isLoading = f, loadingLayer.style.display = f ? 'flex' : 'none');
+const fmt = s => isNaN(s) ? '--:--' : `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* -------------------- プレイリスト -------------------- */
+/* ======== プレイリスト読み込み ======== */
 document.getElementById('fileInput').addEventListener('change', e => {
-  playlist   = Array.from(e.target.files);
-  playOrder  = playlist.map((_, i) => i);
+  playlist = Array.from(e.target.files);
+  playOrder = playlist.map((_, i) => i);
   currentIndex = -1;
   renderPlaylist();
 });
 function renderPlaylist() {
   const list = document.getElementById('playlist');
   list.innerHTML = '';
-  playlist.forEach((file, idx) => {
+  playlist.forEach((f, i) => {
     const div = document.createElement('div');
-    div.textContent = file.name;
-    div.className = 'track' + (idx === currentIndex ? ' selected' : '');
-    div.onclick = () => loadAndPlay(idx);
+    div.textContent = f.name;
+    div.className = 'track' + (i === currentIndex ? ' selected' : '');
+    div.onclick = () => loadAndPlay(i);
     list.appendChild(div);
   });
 }
 
-/* -------------------- 音量・ピッチ -------------------- */
+/* ======== 音量・ピッチ ======== */
 document.getElementById('volumeSlider').addEventListener('input', e => {
   if (player) player.volume.value = Tone.gainToDb(parseFloat(e.target.value));
 });
@@ -131,64 +121,55 @@ document.getElementById('pitchSlider').addEventListener('input', e => {
   document.getElementById('pitchValue').textContent = e.target.value;
   if (pitchShift) pitchShift.pitch = parseInt(e.target.value);
 });
-function adjustPitch(step) {
-  const slider = document.getElementById('pitchSlider');
-  slider.value = Math.max(-12, Math.min(12, parseInt(slider.value) + step));
-  slider.dispatchEvent(new Event('input'));
+function adjustPitch(d) {
+  const s = document.getElementById('pitchSlider');
+  s.value = Math.max(-12, Math.min(12, parseInt(s.value) + d));
+  s.dispatchEvent(new Event('input'));
 }
 
-/* -------------------- シーク -------------------- */
+/* ======== シャッフル ======== */
+const toggleShuffle = () => {
+  shuffle = !shuffle;
+  document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
+};
+
+/* ======== シーク ======== */
 seekSlider.addEventListener('input', e => {
   if (!player || !player.buffer) return;
   const dest = parseFloat(e.target.value);
+  ignoreStop = true;            // ★ 曲送り無効化
   player.stop();
   player.start(undefined, dest);
-  player._startedAt = Tone.now() - dest;   // ★ 再スタート時間を補正
+  player._startedAt = Tone.now() - dest;
+  ignoreStop = false;           // ★ 復帰
   updateSeekBar();
 });
 
-/* -------------------- シャッフル -------------------- */
-function toggleShuffle() {
-  shuffle = !shuffle;
-  document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
-}
-function nextTrack() {
-  if (!playlist.length) return;
-  const nextIdx = shuffle
-    ? (playlist.length === 1 ? currentIndex : (() => {
-        let n;
-        do { n = Math.floor(Math.random() * playlist.length); } while (n === currentIndex);
-        return n;
-      })())
-    : (currentIndex + 1) % playlist.length;
-  loadAndPlay(nextIdx);
-}
-
-/* -------------------- 再生制御 -------------------- */
-async function loadAndPlay(index) {
+/* ======== 再生制御 ======== */
+async function loadAndPlay(idx) {
   if (isLoading) return;
   showLoading(true);
-  stopAudio();               // 既存プレーヤを完全破棄
-  currentIndex = index;
+  stopAudio();
+
+  currentIndex = idx;
   renderPlaylist();
 
-  const file = playlist[index];
-  const buffer = await Tone.context.decodeAudioData(await file.arrayBuffer());
+  const buf = await Tone.context.decodeAudioData(await playlist[idx].arrayBuffer());
 
   pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
-  player = new Tone.Player(buffer).connect(pitchShift);
+  player = new Tone.Player(buf).connect(pitchShift);
   player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
-  player.loop = false;
 
-  player.onstop = () => {        // 曲の自然終了時のみ nextTrack()
-    if (!isLoading && !pausedOffset) nextTrack();
+  player.onstop = () => {              // ★ 曲が自然終了した時だけ nextTrack
+    if (ignoreStop) return;            //   ← 手動停止時は無視
+    nextTrack();
   };
 
   await Tone.start();
   if (Tone.context.state === 'suspended') await Tone.context.resume();
 
   player.start();
-  player._startedAt = Tone.now();   // ★ 再生開始時刻を保存
+  player._startedAt = Tone.now();
   pausedOffset = 0;
   updateSeekBar();
 
@@ -196,53 +177,60 @@ async function loadAndPlay(index) {
   playStatus.style.color = 'green';
   showLoading(false);
 }
-
 function playAudio() {
   if (!player) return;
   Tone.start().then(() => {
     if (Tone.context.state === 'suspended') Tone.context.resume();
 
-    const startAt = pausedOffset;   // 0 なら頭から
+    const startAt = pausedOffset;
+    ignoreStop = true;
     player.start(undefined, startAt);
     player._startedAt = Tone.now() - startAt;
-    pausedOffset = 0;
+    ignoreStop = false;
 
+    pausedOffset = 0;
     updateSeekBar();
     playStatus.textContent = '再生中...';
     playStatus.style.color = 'green';
   });
 }
-
 function pauseAudio() {
   if (player && player.state === 'started') {
     pausedOffset = Tone.now() - player._startedAt;
+    ignoreStop = true;
     player.stop();
+    ignoreStop = false;
     playStatus.textContent = '一時停止中';
     playStatus.style.color = 'orange';
     clearInterval(updateInterval);
   }
 }
-
 function stopAudio() {
   if (player) {
+    ignoreStop = true;
     player.stop();
+    ignoreStop = false;
     player.dispose();
     player = null;
   }
-  if (pitchShift) {
-    pitchShift.dispose();
-    pitchShift = null;
-  }
+  if (pitchShift) { pitchShift.dispose(); pitchShift = null; }
+
   clearInterval(updateInterval);
-  seekSlider.value = 0;
-  seekSlider.max   = 1;
+  seekSlider.value = 0; seekSlider.max = 1;
   timeDisplay.textContent = '--:-- / --:--';
   pausedOffset = 0;
   playStatus.textContent = '停止中';
   playStatus.style.color = 'gray';
 }
+function nextTrack() {
+  if (!playlist.length) return;
+  const n = shuffle
+    ? (playlist.length === 1 ? currentIndex : (() => { let r; do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex); return r; })())
+    : (currentIndex + 1) % playlist.length;
+  loadAndPlay(n);
+}
 
-/* -------------------- シークバー更新 -------------------- */
+/* ======== シークバー表示 ======== */
 function updateSeekBar() {
   if (!player || !player.buffer) return;
   clearInterval(updateInterval);
@@ -250,21 +238,12 @@ function updateSeekBar() {
   const duration = player.buffer.duration;
   seekSlider.max = duration;
 
-  // ☆ まず 1 回即時更新
   const refresh = () => {
-    const now   = Tone.now();
-    const pos   = now - (player._startedAt || now);   // _startedAt が無い場合は 0
-    if (pos >= duration) {
-      seekSlider.value = duration;
-      timeDisplay.textContent = `${formatTime(duration)} / ${formatTime(duration)}`;
-      clearInterval(updateInterval);
-      return;
-    }
-    seekSlider.value = pos;
-    timeDisplay.textContent = `${formatTime(pos)} / ${formatTime(duration)}`;
+    const pos = Tone.now() - (player._startedAt || Tone.now());
+    seekSlider.value = Math.min(pos, duration);
+    timeDisplay.textContent = `${fmt(pos)} / ${fmt(duration)}`;
   };
   refresh();
-
   updateInterval = setInterval(refresh, 500);
 }
   </script>
