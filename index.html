@@ -117,6 +117,7 @@
       if (player && player.buffer && player.buffer.duration) {
         const newTime = parseFloat(e.target.value) * player.buffer.duration;
         player.seek(newTime);
+         timeDisplay.textContent = formatTime(newTime) + ' / ' + formatTime(player.buffer.duration); // 即時反映
       }
     });
 
