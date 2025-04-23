@@ -64,18 +64,18 @@
     <div class="time-display" id="timeDisplay">--:-- / --:--</div>
   </div>
 
-  <!-- バックグラウンド再生用 audio（playsinline でフルスクリーン抑止） -->
+  <!-- バックグラウンド再生用 audio -->
   <audio id="htmlAudio" preload="auto" playsinline style="display:none"></audio>
 
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.8</span>
+    <span class="version">v1.8.1</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ───── DOM & 変数 ───── */
+/* ─────────── 変数 & DOM ─────────── */
 const htmlAudio  = document.getElementById('htmlAudio');
 const playStatus = document.getElementById('playStatus');
 const timeDisp   = document.getElementById('timeDisplay');
@@ -87,11 +87,11 @@ const fileInput  = document.getElementById('fileInput');
 let playlist=[], currentIndex=-1, shuffle=false, timer=null;
 let mediaSrc=null, pitchShift=null;
 
-/* ───── 共通 ───── */
+/* ─────────── 共通 ─────────── */
 const showLoading = f=>loadingLay.style.display=f?'flex':'none';
 const fmt=s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ───── ファイル読み込み ───── */
+/* ─────────── ファイル追加 ─────────── */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
@@ -113,7 +113,7 @@ function renderPlaylist(){
   metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
 }
 
-/* ───── ピッチ変更 ───── */
+/* ─────────── ピッチ変更 ─────────── */
 document.getElementById('pitchSlider').addEventListener('input',e=>{
   if(pitchShift) pitchShift.pitch=parseInt(e.target.value);
   document.getElementById('pitchValue').textContent=e.target.value;
@@ -124,17 +124,16 @@ function adjustPitch(d){
   s.dispatchEvent(new Event('input'));
 }
 
-/* ───── AudioContext の自動復帰 ───── */
+/* ─────────── AudioContext 自動復帰 ─────────── */
 function ensureAudioContext(){
   if(Tone.context.state!=='running'){
     Tone.context.resume().catch(()=>{});
   }
 }
 document.addEventListener('visibilitychange', ensureAudioContext);
-document.addEventListener('resume', ensureAudioContext);      // iOS PWA
-htmlAudio.addEventListener('timeupdate', ensureAudioContext); // 保険
+htmlAudio.addEventListener('timeupdate', ensureAudioContext);
 
-/* ───── 再生制御 ───── */
+/* ─────────── 再生制御 ─────────── */
 async function loadAndPlay(idx){
   if(!playlist.length) return;
   showLoading(true); stopAudio(false);
@@ -145,7 +144,7 @@ async function loadAndPlay(idx){
   await Tone.start();
   if(Tone.context.state==='suspended') await Tone.context.resume();
 
-  /* AudioNodes (最初だけ生成) */
+  /* AudioNodes (最初だけ作成) */
   if(!mediaSrc){
     mediaSrc = Tone.context.createMediaElementSource(htmlAudio);
     pitchShift = new Tone.PitchShift({
@@ -154,10 +153,20 @@ async function loadAndPlay(idx){
     mediaSrc.connect(pitchShift);
   }
 
-  await htmlAudio.play();
-  updateSeekBar();
-  playStatus.textContent='再生中'; playStatus.style.color='green';
-  showLoading(false);
+  /* playing イベントでもオーバーレイを閉じる保険 */
+  htmlAudio.addEventListener('playing', ()=>showLoading(false), { once:true });
+
+  try{
+    await htmlAudio.play();          // play が拒否される場合があるので try…catch
+    updateSeekBar();
+    playStatus.textContent='再生中';
+    playStatus.style.color='green';
+  }catch(err){
+    console.error('play() 失敗:', err);
+    alert('このファイルは再生できませんでした。');
+  }finally{
+    showLoading(false);              // 成否にかかわらず必ず閉じる
+  }
 }
 function playAudio(){
   if(!htmlAudio.src) return;
@@ -189,7 +198,7 @@ function toggleShuffle(){
 }
 htmlAudio.addEventListener('ended', ()=>nextTrack());
 
-/* ───── シークバー ───── */
+/* ─────────── シークバー ─────────── */
 seekSlider.addEventListener('input',e=>{
   if(!htmlAudio.duration) return;
   htmlAudio.currentTime=parseFloat(e.target.value);
