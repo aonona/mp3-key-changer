@@ -4,22 +4,31 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MP3 キーチェンジャー</title>
+
+<!-- ── レイアウト ── -->
 <style>
   body{font-family:sans-serif;margin:0;padding:20px 20px 70px;}
-  #playlist{margin-top:10px;max-height:35vh;overflow:auto;border:1px solid #ccc;padding:4px;}
-  .track{cursor:pointer;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-         padding:2px 4px;border-bottom:1px solid #eee;}
+  #playlist{margin-top:10px;max-height:35vh;overflow:auto;
+            border:1px solid #ccc;padding:4px;}
+  .track{cursor:pointer;margin-bottom:5px;white-space:nowrap;
+         overflow:hidden;text-overflow:ellipsis;padding:2px 4px;
+         border-bottom:1px solid #eee;}
   .track.selected{font-weight:bold;color:blue;}
+
   .controls,.sliders{margin-top:20px;}
   input[type=range]{width:100%;}
   .inline-label{display:flex;align-items:center;gap:8px;}
   .key-control-buttons{display:flex;gap:8px;align-items:center;}
   .time-display{margin-top:10px;font-size:14px;color:#333;}
+
   .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.8);
-    display:none;justify-content:center;align-items:center;font-size:20px;font-weight:bold;z-index:999;}
+    display:none;justify-content:center;align-items:center;font-size:20px;
+    font-weight:bold;z-index:999;}
+
   footer{position:fixed;inset-block-end:0;inset-inline:0;background:#f2f2f2;
     border-top:1px solid #ccc;padding:10px 20px;font-size:14px;color:#666;
     display:flex;justify-content:space-between;align-items:center;}
+
   @media(max-width:600px){
     body{padding:10px 10px 70px;}
     button{font-size:16px;padding:10px;width:100%;margin-bottom:10px;}
@@ -30,10 +39,11 @@
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
 
-  <!-- Media Session API を使えばロック画面操作も可能です（iOS15+） -->
+  <!-- Media Session API を使えばロック画面操作も可能です（iOS 15+） -->
   <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
   <div id="playlist"></div>
 
+  <!-- ── 再生操作 ── -->
   <div class="controls">
     <button onclick="playAudio()">再生</button>
     <button onclick="pauseAudio()">一時停止</button>
@@ -42,6 +52,7 @@
     <button onclick="toggleShuffle()">シャッフル: <span id="shuffleState">OFF</span></button>
   </div>
 
+  <!-- ── キー変更 & シーク ── -->
   <div class="sliders">
     <label class="inline-label">キー変更（半音）:
       <div class="key-control-buttons">
@@ -59,35 +70,36 @@
     <div class="time-display" id="timeDisplay">--:-- / --:--</div>
   </div>
 
-  <audio id="htmlAudio" preload="auto" style="display:none"></audio>
+  <!-- バックグラウンド再生用 (★ video に変更 playsinlineで映像を出さない) -->
+  <video id="htmlMedia" preload="auto" playsinline style="display:none"></video>
 
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.5</span>
+    <span class="version">v1.6</span>
   </footer>
 
+  <!-- ── Tone.js ── -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ───── 変数 & DOM ───── */
-const htmlAudio   = document.getElementById('htmlAudio');
-const playStatus  = document.getElementById('playStatus');
-const timeDisplay = document.getElementById('timeDisplay');
-const seekSlider  = document.getElementById('seekSlider');
-const loadingLay  = document.getElementById('loadingOverlay');
-const metaInfo    = document.getElementById('metaInfo');
-const fileInput   = document.getElementById('fileInput');
+/* ========== 変数 & DOM ========== */
+const htmlMedia  = document.getElementById('htmlMedia');   // ← video 要素
+const playStatus = document.getElementById('playStatus');
+const timeDisp   = document.getElementById('timeDisplay');
+const seekSlider = document.getElementById('seekSlider');
+const loadingLay = document.getElementById('loadingOverlay');
+const metaInfo   = document.getElementById('metaInfo');
+const fileInput  = document.getElementById('fileInput');
 
-let playlist = [], currentIndex = -1, shuffle = false, updateTimer = null;
-/* AudioNodes（後で作る） */
-let mediaSrc   = null;   // MediaElementSourceNode
-let pitchShift = null;   // Tone.PitchShift
+let playlist = [], currentIndex = -1, shuffle = false, timer = null;
+let mediaSrc = null, pitchShift = null;   // AudioNodes
 
-/* ───── 共通関数 ───── */
-const showLoading = on => loadingLay.style.display = on ? 'flex' : 'none';
-const fmt = s=>isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+/* ========== 共通 ========== */
+const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
+const fmt = s => isNaN(s) ? '--:--'
+            : `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ───── ファイル追加 ───── */
+/* ========== ファイル追加 ========== */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
@@ -97,30 +109,30 @@ fileInput.addEventListener('change', e=>{
   renderPlaylist();
 });
 function renderPlaylist(){
-  const list=document.getElementById('playlist');
-  list.innerHTML='';
+  const list = document.getElementById('playlist');
+  list.innerHTML = '';
   playlist.forEach((f,i)=>{
-    const div=document.createElement('div');
-    div.textContent=f.name;
-    div.className='track'+(i===currentIndex?' selected':'');
-    div.onclick=()=>loadAndPlay(i);
+    const div = document.createElement('div');
+    div.textContent = f.name;
+    div.className   = 'track' + (i===currentIndex?' selected':'');
+    div.onclick     = () => loadAndPlay(i);
     list.appendChild(div);
   });
-  metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
+  metaInfo.textContent = `プレイリスト: ${playlist.length} 曲`;
 }
 
-/* ───── ピッチ ───── */
+/* ========== ピッチ変更 ========== */
 document.getElementById('pitchSlider').addEventListener('input', e=>{
   if(pitchShift) pitchShift.pitch = parseInt(e.target.value);
   document.getElementById('pitchValue').textContent = e.target.value;
 });
-function adjustPitch(d){
-  const s=document.getElementById('pitchSlider');
-  s.value = Math.max(-12, Math.min(12, parseInt(s.value)+d));
+function adjustPitch(step){
+  const s = document.getElementById('pitchSlider');
+  s.value = Math.max(-12, Math.min(12, parseInt(s.value)+step));
   s.dispatchEvent(new Event('input'));
 }
 
-/* ───── 再生制御 ───── */
+/* ========== 再生制御 ========== */
 async function loadAndPlay(idx){
   if(!playlist.length) return;
   showLoading(true);
@@ -129,27 +141,23 @@ async function loadAndPlay(idx){
   currentIndex = idx;
   renderPlaylist();
 
-  htmlAudio.src = URL.createObjectURL(playlist[idx]);
+  htmlMedia.src = URL.createObjectURL(playlist[idx]);
 
   await Tone.start();
   if(Tone.context.state==='suspended') await Tone.context.resume();
 
-  /* ─ 新規 AudioNode を安全に作成 ─ */
+  /* AudioNodes を初回だけ構築 */
   if(!pitchShift){
-    pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
+    pitchShift = new Tone.PitchShift({
+      pitch: parseInt(document.getElementById('pitchSlider').value)
+    }).toDestination();
   }
   if(!mediaSrc){
-    try{
-      mediaSrc = Tone.context.createMediaElementSource(htmlAudio);
-      mediaSrc.connect(pitchShift);
-    }catch(err){
-      console.error('MediaElementSourceNode 作成失敗:', err);
-      showLoading(false);
-      return;
-    }
+    mediaSrc = Tone.context.createMediaElementSource(htmlMedia);
+    mediaSrc.connect(pitchShift);
   }
 
-  await htmlAudio.play();
+  await htmlMedia.play();
   updateSeekBar();
 
   playStatus.textContent = '再生中';
@@ -157,26 +165,26 @@ async function loadAndPlay(idx){
   showLoading(false);
 }
 function playAudio(){
-  if(!htmlAudio.src) return;
-  Tone.start().then(async ()=>{
+  if(!htmlMedia.src) return;
+  Tone.start().then(async()=>{
     if(Tone.context.state==='suspended') await Tone.context.resume();
-    htmlAudio.play();
+    htmlMedia.play();
     playStatus.textContent = '再生中';
     playStatus.style.color = 'green';
   });
 }
 function pauseAudio(){
-  if(htmlAudio.paused) return;
-  htmlAudio.pause();
+  if(htmlMedia.paused) return;
+  htmlMedia.pause();
   playStatus.textContent = '一時停止';
   playStatus.style.color = 'orange';
 }
 function stopAudio(reset=true){
-  htmlAudio.pause();
-  htmlAudio.currentTime = 0;
-  clearInterval(updateTimer);
+  htmlMedia.pause();
+  htmlMedia.currentTime = 0;
+  clearInterval(timer);
   seekSlider.value = 0;
-  timeDisplay.textContent = '--:-- / --:--';
+  timeDisp.textContent = '--:-- / --:--';
   if(reset){
     playStatus.textContent = '停止';
     playStatus.style.color = 'gray';
@@ -194,25 +202,24 @@ function toggleShuffle(){
   shuffle = !shuffle;
   document.getElementById('shuffleState').textContent = shuffle ? 'ON' : 'OFF';
 }
-htmlAudio.addEventListener('ended', ()=> nextTrack());
+htmlMedia.addEventListener('ended', ()=> nextTrack());
 
-/* ───── シークバー ───── */
+/* ========== シークバー ========== */
 seekSlider.addEventListener('input', e=>{
-  if(!htmlAudio.duration) return;
-  htmlAudio.currentTime = parseFloat(e.target.value);
+  if(!htmlMedia.duration) return;
+  htmlMedia.currentTime = parseFloat(e.target.value);
 });
 function updateSeekBar(){
-  clearInterval(updateTimer);
-  if(!htmlAudio.duration) return;
-  const dur = htmlAudio.duration;
-  seekSlider.max = dur;
+  clearInterval(timer);
+  if(!htmlMedia.duration) return;
+  seekSlider.max = htmlMedia.duration;
 
   const refresh = ()=>{
-    seekSlider.value = htmlAudio.currentTime;
-    timeDisplay.textContent = `${fmt(htmlAudio.currentTime)} / ${fmt(dur)}`;
+    seekSlider.value = htmlMedia.currentTime;
+    timeDisp.textContent = `${fmt(htmlMedia.currentTime)} / ${fmt(htmlMedia.duration)}`;
   };
   refresh();
-  updateTimer = setInterval(refresh, 500);
+  timer = setInterval(refresh, 500);
 }
   </script>
 </body>
