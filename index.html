@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" content="text/html">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MP3 キーチェンジャー</title>
 
@@ -70,7 +70,7 @@
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.8.1</span>
+    <span class="version">v1.8.2</span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
@@ -146,18 +146,21 @@ async function loadAndPlay(idx){
 
   /* AudioNodes (最初だけ作成) */
   if(!mediaSrc){
-    mediaSrc = Tone.context.createMediaElementSource(htmlAudio);
+    mediaSrc   = Tone.context.createMediaElementSource(htmlAudio);
     pitchShift = new Tone.PitchShift({
       pitch: parseInt(document.getElementById('pitchSlider').value)
     }).toDestination();
     mediaSrc.connect(pitchShift);
   }
 
-  /* playing イベントでもオーバーレイを閉じる保険 */
-  htmlAudio.addEventListener('playing', ()=>showLoading(false), { once:true });
+  /* 通常 or エラー時にオーバーレイを閉じるリスナ */
+  const hideOverlay = ()=> showLoading(false);
+  ['playing','error','abort','stalled'].forEach(ev=>{
+    htmlAudio.addEventListener(ev, hideOverlay, { once:true });
+  });
 
   try{
-    await htmlAudio.play();          // play が拒否される場合があるので try…catch
+    await htmlAudio.play();     // Promise rejection → catch
     updateSeekBar();
     playStatus.textContent='再生中';
     playStatus.style.color='green';
@@ -165,7 +168,7 @@ async function loadAndPlay(idx){
     console.error('play() 失敗:', err);
     alert('このファイルは再生できませんでした。');
   }finally{
-    showLoading(false);              // 成否にかかわらず必ず閉じる
+    showLoading(false);         // 成功でも失敗でも必ず閉じる
   }
 }
 function playAudio(){
