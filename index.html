@@ -118,7 +118,10 @@
 
     function nextTrack() {
       if (shuffle) {
-        const next = Math.floor(Math.random() * playlist.length);
+        let next;
+        do {
+          next = Math.floor(Math.random() * playlist.length);
+        } while (next === currentIndex && playlist.length > 1);
         loadAndPlay(next);
       } else {
         const nextIndex = (currentIndex + 1) % playlist.length;
@@ -207,7 +210,7 @@
       if (player) {
         player.stop();
         clearInterval(updateInterval);
-        document.getElementById('seekSlider').value = 0;
+        seekSlider.value = 0;
         timeDisplay.textContent = '--:-- / --:--';
         playStatus.textContent = '停止中';
         playStatus.style.color = 'gray';
@@ -223,18 +226,19 @@
     function updateSeekBar() {
       if (!player || !player.buffer || !player.buffer.duration) return;
       clearInterval(updateInterval);
+      const duration = player.buffer.duration;
       updateInterval = setInterval(() => {
-        if (player && player.buffer.duration) {
-          const pos = player.now() - player._startTime + player._startOffset;
-          const duration = player.buffer.duration;
-          const progress = pos / duration;
-          document.getElementById('seekSlider').value = progress;
+        const pos = player.now() - player._startTime + (player._startOffset || 0);
+        const progress = Math.min(pos / duration, 1);
+        if (!isNaN(progress)) {
+          seekSlider.value = progress;
           timeDisplay.textContent = formatTime(pos) + ' / ' + formatTime(duration);
         }
       }, 500);
     }
 
     function formatTime(seconds) {
+      if (isNaN(seconds)) return '--:--';
       const mins = Math.floor(seconds / 60);
       const secs = Math.floor(seconds % 60);
       return mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
