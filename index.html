@@ -35,7 +35,7 @@
 </head>
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
-  <h1>クライアントサイド MP3 キーチェンジャー</h1>
+  <h1>クライアントサイド MP3 キーチェンジャー1.1</h1>
   <input type="file" id="fileInput" multiple accept="audio/mp3">
   <div id="playlist"></div>
   <div class="controls">
@@ -102,7 +102,7 @@
       if (pitchShift) pitchShift.pitch = parseInt(e.target.value);
     });
 
-    seekSlider.addEventListener('change', e => {
+    seekSlider.addEventListener('input', e => {
       if (player && player.buffer && player.buffer.duration) {
         const newTime = parseFloat(e.target.value) * player.buffer.duration;
         player.stop();
@@ -168,7 +168,7 @@
       const audioBuffer = await Tone.context.decodeAudioData(arrayBuffer);
 
       pitchShift = new Tone.PitchShift({ pitch: parseInt(document.getElementById('pitchSlider').value) }).toDestination();
-      player = new Tone.Player(audioBuffer).connect(pitchShift);
+      player = new Tone.Player({ url: audioBuffer, autostart: false }).connect(pitchShift);
       player.volume.value = Tone.gainToDb(parseFloat(document.getElementById('volumeSlider').value));
 
       player.onstop = () => {
@@ -188,7 +188,6 @@
 
     function playAudio() {
       if (isLoading || !player) return;
-      stopAudio();
       Tone.start().then(() => {
         if (Tone.context.state === 'suspended') Tone.context.resume();
         player.start();
@@ -228,11 +227,12 @@
       clearInterval(updateInterval);
       const duration = player.buffer.duration;
       updateInterval = setInterval(() => {
-        const pos = player.now() - player._startTime + (player._startOffset || 0);
-        const progress = Math.min(pos / duration, 1);
+        const now = Tone.now();
+        const elapsed = player._startTime ? now - player._startTime + (player._startOffset || 0) : 0;
+        const progress = Math.min(elapsed / duration, 1);
         if (!isNaN(progress)) {
           seekSlider.value = progress;
-          timeDisplay.textContent = formatTime(pos) + ' / ' + formatTime(duration);
+          timeDisplay.textContent = formatTime(elapsed) + ' / ' + formatTime(duration);
         }
       }, 500);
     }
