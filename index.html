@@ -3,851 +3,283 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>MP3 キーチェンジャー</title>
 
 <style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    margin: 0;
-    padding: 20px 20px 70px;
-    background: #f7f7f7;
-  }
-  
-  h1 {
-    font-size: 24px;
-    margin-bottom: 20px;
-    color: #333;
-  }
-  
-  #fileInput {
-    background: white;
-    border: 1px solid #ddd;
-    padding: 10px;
-    border-radius: 8px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  
-  .section {
-    margin: 20px 0;
-    padding: 15px;
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-  }
-  
-  #playlist {
-    max-height: 35vh;
-    overflow: auto;
-    border: 1px solid #eee;
-    padding: 4px;
-    border-radius: 8px;
-    margin-top: 15px;
-  }
-  
-  .track {
-    cursor: pointer;
-    margin-bottom: 5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 8px 10px;
-    border-bottom: 1px solid #eee;
-    border-radius: 4px;
-  }
-  
-  .track:hover {
-    background: #f5f5f5;
-  }
-  
-  .track.selected {
-    font-weight: bold;
-    color: white;
-    background: #007aff;
-  }
-  
-  .controls {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-  
-  button {
-    background: #007aff;
-    color: white;
-    border: none;
-    padding: 12px;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 500;
-  }
-  
-  .sliders {
-    margin-top: 20px;
-  }
-  
-  .slider-group {
-    margin-bottom: 15px;
-  }
-  
-  .slider-label {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  
-  .key-control-buttons {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  
-  .key-control-buttons button {
-    padding: 5px 10px;
-    font-size: 14px;
-  }
-  
-  input[type=range] {
-    width: 100%;
-    margin: 8px 0;
-  }
-  
-  .time-display {
-    margin-top: 10px;
-    font-size: 14px;
-    color: #333;
-    text-align: center;
-  }
-  
-  .loading-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(255,255,255,.8);
-    display: none;
-    justify-content: center;
-    align-items: center;
-    font-size: 20px;
-    font-weight: bold;
-    z-index: 999;
-  }
-  
-  .hidden-media {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0.01;
-    pointer-events: none;
-  }
-  
-  .status-message {
-    padding: 10px;
-    background: #f3f3f3;
-    border-radius: 8px;
-    margin-top: 10px;
-    font-size: 14px;
-    color: #555;
-    text-align: center;
-  }
-  
-  footer {
-    position: fixed;
-    inset-block-end: 0;
-    inset-inline: 0;
-    background: #f2f2f2;
-    border-top: 1px solid #ccc;
-    padding: 10px 20px;
-    font-size: 14px;
-    color: #666;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  
-  @media(max-width:600px) {
-    body {
-      padding: 10px 10px 70px;
-    }
-    .controls {
-      grid-template-columns: 1fr;
-    }
+  body{font-family:sans-serif;margin:0;padding:20px 20px 70px;}
+  #playlist{margin-top:10px;max-height:35vh;overflow:auto;border:1px solid #ccc;padding:4px;}
+  .track{cursor:pointer;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+         padding:2px 4px;border-bottom:1px solid #eee;}
+  .track.selected{font-weight:bold;color:blue;}
+
+  .controls,.sliders{margin-top:20px;}
+  input[type=range]{width:100%;}
+  .inline-label{display:flex;align-items:center;gap:8px;}
+  .key-control-buttons{display:flex;gap:8px;align-items:center;}
+  .time-display{margin-top:10px;font-size:14px;color:#333;}
+
+  .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.8);
+    display:none;justify-content:center;align-items:center;font-size:20px;font-weight:bold;z-index:999;}
+
+  footer{position:fixed;inset-block-end:0;inset-inline:0;background:#f2f2f2;
+    border-top:1px solid #ccc;padding:10px 20px;font-size:14px;color:#666;
+    display:flex;justify-content:space-between;align-items:center;}
+
+  @media(max-width:600px){
+    body{padding:10px 10px 70px;}
+    button{font-size:16px;padding:10px;width:100%;margin-bottom:10px;}
+    .inline-label{flex-direction:column;align-items:flex-start;}
   }
 </style>
 </head>
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
 
-  <h1>MP3 キーチェンジャー</h1>
-  
-  <div class="section">
-    <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
-    <div id="playlist"></div>
+  <!-- ================= プレイヤー UI ================= -->
+  <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
+  <div id="playlist"></div>
+
+  <div class="controls">
+    <button onclick="playAudio()">再生</button>
+    <button onclick="pauseAudio()">一時停止</button>
+    <button onclick="stopAudio()">停止</button>
+    <button onclick="nextTrack()">次の曲へ</button>
+    <button onclick="toggleShuffle()">シャッフル: <span id="shuffleState">OFF</span></button>
   </div>
 
-  <div class="section">
-    <div class="controls">
-      <button onclick="playAudio()">再生</button>
-      <button onclick="pauseAudio()">一時停止</button>
-      <button onclick="stopAudio()">停止</button>
-      <button onclick="nextTrack()">次の曲へ</button>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="sliders">
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>キー変更（半音）:</span>
-          <div class="key-control-buttons">
-            <button onclick="adjustPitch(-1)">−</button>
-            <span id="pitchValue">0</span>
-            <button onclick="adjustPitch(1)">＋</button>
-          </div>
-        </div>
+  <div class="sliders">
+    <label class="inline-label">キー変更（半音）:
+      <div class="key-control-buttons">
+        <button onclick="adjustPitch(-1)">−</button>
         <input type="range" id="pitchSlider" min="-12" max="12" step="1" value="0">
+        <button onclick="adjustPitch(1)">＋</button>
+        <span id="pitchValue">0</span>
       </div>
-      
-      <div class="slider-group">
-        <div class="slider-label">
-          <span>再生位置:</span>
-        </div>
-        <input type="range" id="seekSlider" min="0" max="1" step="0.01" value="0">
-      </div>
-    </div>
-    
-    <div class="time-display" id="timeDisplay">--:-- / --:--</div>
-    <div class="status-message" id="statusMessage">ファイルを選択してください</div>
-  </div>
+    </label>
 
-  <!-- バックグラウンド再生支援要素 -->
-  <audio id="audioElement" class="hidden-media"></audio>
-  <audio id="silentAudio" loop preload="auto" class="hidden-media"></audio>
-  <video id="silentVideo" loop muted playsinline class="hidden-media"></video>
+    <label>再生位置:
+      <input type="range" id="seekSlider" min="0" max="1" step="0.01" value="0">
+    </label>
+
+    <div class="time-display" id="timeDisplay">--:-- / --:--</div>
+  </div>
 
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v2.1 iOS対応</span>
+    <span class="version">v1.8</span>
   </footer>
+
+  <!-- ============= 背景再生を支える隠し audio ============= -->
+  <!-- (1) Safari・Chrome 共通: Web Audio の出力をここに流し込み AudioSession を確立 -->
+  <audio id="bgHolder" muted playsinline style="display:none"></audio>
+
+  <!-- (2) Chrome/iOS 用: 無音ループで AudioSession を維持（必須ではないが安定度向上） -->
+  <audio id="keepAwake"
+         src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAwCAAH/////8AAABhTEFNRTMuOTlyBLkAAAAAAAAAAAACAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
+         loop
+         style="display:none"></audio>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-// DOM要素
-const fileInput = document.getElementById('fileInput');
-const playlist = document.getElementById('playlist');
-const pitchSlider = document.getElementById('pitchSlider');
-const pitchValue = document.getElementById('pitchValue');
-const seekSlider = document.getElementById('seekSlider');
-const timeDisplay = document.getElementById('timeDisplay');
-const loadingOverlay = document.getElementById('loadingOverlay');
-const metaInfo = document.getElementById('metaInfo');
+/* ───────── 変数 & DOM ───────── */
 const playStatus = document.getElementById('playStatus');
-const statusMessage = document.getElementById('statusMessage');
-const audioElement = document.getElementById('audioElement');
-const silentAudio = document.getElementById('silentAudio');
-const silentVideo = document.getElementById('silentVideo');
+const timeDisp   = document.getElementById('timeDisplay');
+const seekSlider = document.getElementById('seekSlider');
+const loadingLay = document.getElementById('loadingOverlay');
+const metaInfo   = document.getElementById('metaInfo');
+const fileInput  = document.getElementById('fileInput');
+const bgHolder   = document.getElementById('bgHolder');
+const keepAwake  = document.getElementById('keepAwake');
 
-// 変数
-let tracks = [];
-let currentTrackIndex = -1;
-let player = null;
-let pitchShift = null;
-let timer = null;
-let audioContext = null;
-let mediaStreamDestination = null;
-let backgroundWatchdog = null;
+let playlist=[], currentIndex=-1, shuffle=false;
+let player=null, pitchNode=null, timer=null;
 
-// 初期化
-window.addEventListener('DOMContentLoaded', init);
+/* ───────── 共通関数 ───────── */
+const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
+const fmt = s => isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-function init() {
-  console.log('初期化開始');
-  
-  // イベントリスナー設定
-  fileInput.addEventListener('change', handleFiles);
-  pitchSlider.addEventListener('input', updatePitch);
-  seekSlider.addEventListener('input', handleSeek);
-  
-  // オーディオ環境の準備
-  setupAudioEnvironment();
-  
-  // バックグラウンド検出
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  
-  showStatus('準備完了 - ファイルを選択してください');
-}
-
-// オーディオ環境のセットアップ
-async function setupAudioEnvironment() {
-  try {
-    // AudioContextの初期化
-    Tone.setContext(new Tone.Context({
-      latencyHint: 'playback',
-      lookAhead: 0.2
-    }));
-    
-    audioContext = Tone.context;
-    
-    // 無音ファイルの準備
-    const silentAudioUrl = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tAwAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAADwgBXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dX//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJANXAAAAAAAAA8IxWCVbAAAA';
-    silentAudio.src = silentAudioUrl;
-    
-    // 無音動画の準備
-    const silentVideoUrl = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAA3RtZGF0AAAC8gYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE1OCByMjk5OSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMTkgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAUmWIhAA//vbsQn1ytqKRer/Aicz1AANDwAD7UG+yfmIAAAAASUVORK5CYII=';
-    silentVideo.src = silentVideoUrl;
-    
-    // オーディオノードの準備
-    pitchShift = new Tone.PitchShift({
-      pitch: 0,
-      windowSize: 0.05,
-      delayTime: 0.01
-    }).toDestination();
-    
-    mediaStreamDestination = audioContext.createMediaStreamDestination();
-    
-    // AudioContextアンロック（ユーザージェスチャー必要）
-    document.addEventListener('click', unlockAudio, { once: true });
-    document.addEventListener('touchstart', unlockAudio, { once: true });
-    
-    console.log('オーディオ環境のセットアップ完了');
-  } catch (e) {
-    console.error('オーディオ環境のセットアップエラー:', e);
-    showStatus('エラー: オーディオシステムの初期化に失敗しました');
-  }
-}
-
-// オーディオアンロック
-async function unlockAudio() {
-  try {
-    await Tone.start();
-    
-    // 各オーディオ/ビデオ要素を開始
-    silentAudio.play().catch(() => {});
-    silentVideo.play().catch(() => {});
-  } catch (e) {
-    console.warn('バックグラウンド要素開始エラー:', e);
-  }
-}
-
-// バックグラウンド切替検出
-function handleVisibilityChange() {
-  if (document.hidden) {
-    // バックグラウンドへ移行
-    console.log('バックグラウンドへ移行');
-    startBackgroundWatchdog();
-  } else {
-    // 前面へ復帰
-    console.log('前面へ復帰');
-    stopBackgroundWatchdog();
-    
-    // AudioContextが停止していたら再開
-    if (audioContext.state !== 'running') {
-      audioContext.resume().catch(() => {});
-    }
-    
-    // 再生状態の回復
-    if (player && player.state !== 'started' && playStatus.textContent === '再生中') {
-      startPlayback();
-    }
-  }
-}
-
-// バックグラウンド監視の開始
-function startBackgroundWatchdog() {
-  if (backgroundWatchdog) {
-    clearInterval(backgroundWatchdog);
-  }
-  
-  // バックグラウンド再生維持のための要素を開始
-  startBackgroundElements();
-  
-  // 5秒ごとにバックグラウンド維持処理を実行
-  backgroundWatchdog = setInterval(() => {
-    if (document.hidden && player && player.state === 'started') {
-      // バックグラウンド再生維持対策
-      silentAudio.play().catch(() => {});
-      silentVideo.play().catch(() => {});
-      
-      // iOS向け追加のバックグラウンド維持処理
-      triggerIOSWakeup();
-      
-      // MediaSession再アクティブ化
-      updateMediaSessionState('playing');
-    }
-  }, 5000);
-}
-
-// バックグラウンド監視の停止
-function stopBackgroundWatchdog() {
-  if (backgroundWatchdog) {
-    clearInterval(backgroundWatchdog);
-    backgroundWatchdog = null;
-  }
-}
-
-// iOS向けウェイクアップトリガー
-function triggerIOSWakeup() {
-  try {
-    // 小さな音を一瞬鳴らす
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    gain.gain.value = 0.001; // ほぼ無音
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.start();
-    osc.stop(audioContext.currentTime + 0.1);
-  } catch (e) {
-    console.warn('ウェイクアップエラー:', e);
-  }
-}
-  </script>
-</body>
-</html>Video.play().catch(() => {});
-    
-    // 無音オシレーター再生（iOS向け追加対策）
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    gain.gain.value = 0.001;
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.start();
-    osc.stop(audioContext.currentTime + 0.1);
-    
-    console.log('オーディオアンロック成功');
-  } catch (e) {
-    console.warn('オーディオアンロック失敗:', e);
-  }
-}
-
-// ファイル選択処理
-function handleFiles(e) {
-  const files = e.target.files;
-  if (!files || files.length === 0) return;
-  
-  console.log(`${files.length}個のファイルが選択されました`);
-  
-  // ユーザージェスチャーでオーディオアンロック
-  unlockAudio();
-  
-  // ファイル処理
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    if (file.type.includes('audio') || file.name.endsWith('.mp3')) {
-      tracks.push({
-        name: file.name,
-        file: file,
-        objectUrl: URL.createObjectURL(file)
-      });
-    }
-  }
-  
-  // 入力をクリア
-  fileInput.value = '';
-  
-  // プレイリスト更新
-  updatePlaylist();
-  
-  // メタ情報更新
-  metaInfo.textContent = `プレイリスト: ${tracks.length} 曲`;
-  
-  // 自動再生（初回のみ）
-  if (currentTrackIndex === -1 && tracks.length > 0) {
-    currentTrackIndex = 0;
-    loadTrack(currentTrackIndex);
-  }
-  
-  showStatus(`${tracks.length}曲をプレイリストに追加しました`);
-}
-
-// プレイリスト表示更新
-function updatePlaylist() {
-  // プレイリストをクリア
-  playlist.innerHTML = '';
-  
-  if (tracks.length === 0) {
-    const emptyMsg = document.createElement('div');
-    emptyMsg.className = 'track';
-    emptyMsg.textContent = 'プレイリストは空です。ファイルを選択してください。';
-    emptyMsg.style.fontStyle = 'italic';
-    emptyMsg.style.color = '#999';
-    playlist.appendChild(emptyMsg);
-    return;
-  }
-  
-  // 各トラック要素を作成
-  tracks.forEach((track, index) => {
-    const trackElement = document.createElement('div');
-    trackElement.className = 'track' + (index === currentTrackIndex ? ' selected' : '');
-    trackElement.textContent = track.name;
-    trackElement.addEventListener('click', () => {
-      currentTrackIndex = index;
-      loadTrack(index);
-    });
-    playlist.appendChild(trackElement);
+/* ───────── ファイル追加 ───────── */
+fileInput.addEventListener('change', e=>{
+  if(!e.target.files.length){ fileInput.value=''; return; }
+  Array.from(e.target.files).forEach(f=>{
+    if(!playlist.some(p=>p.name===f.name)) playlist.push(f);
   });
-  
-  console.log('プレイリスト更新完了:', tracks.length, '曲');
+  fileInput.value='';
+  renderPlaylist();
+});
+function renderPlaylist(){
+  const list=document.getElementById('playlist');
+  list.innerHTML='';
+  playlist.forEach((f,i)=>{
+    const div=document.createElement('div');
+    div.textContent=f.name;
+    div.className='track'+(i===currentIndex?' selected':'');
+    div.onclick=()=>loadAndPlay(i);
+    list.appendChild(div);
+  });
+  metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
 }
 
-// トラックを読み込む
-async function loadTrack(index) {
-  if (index < 0 || index >= tracks.length) return;
-  
+/* ───────── ピッチ変更 ───────── */
+document.getElementById('pitchSlider').addEventListener('input', e=>{
+  if(pitchNode) pitchNode.pitch = parseInt(e.target.value);
+  document.getElementById('pitchValue').textContent = e.target.value;
+});
+function adjustPitch(step){
+  const s=document.getElementById('pitchSlider');
+  s.value=Math.max(-12,Math.min(12,parseInt(s.value)+step));
+  s.dispatchEvent(new Event('input'));
+}
+
+/* ───────── 再生制御メイン ───────── */
+async function loadAndPlay(idx){
+  if(!playlist.length) return;
+
   showLoading(true);
   stopAudio(false);
-  
-  try {
-    currentTrackIndex = index;
-    const track = tracks[currentTrackIndex];
-    
-    console.log(`トラック読み込み: ${track.name}`);
-    
-    // プレイリスト選択状態更新
-    updatePlaylist();
-    
-    // オーディオバッファの読み込み
-    const arrayBuffer = await readFileAsArrayBuffer(track.file);
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    
-    // プレイヤー設定
-    player = new Tone.Player({
-      url: audioBuffer,
-      onload: () => console.log('プレイヤー読み込み完了'),
-      onerror: (e) => console.error('プレイヤー読み込みエラー:', e)
-    });
-    
-    // プレイヤーをピッチシフトに接続
-    player.connect(pitchShift);
-    
-    // バックグラウンド再生用のストリーム接続
-    pitchShift.connect(mediaStreamDestination);
-    audioElement.srcObject = mediaStreamDestination.stream;
-    
-    // MediaSession設定
-    setupMediaSession(track.name);
-    
-    // 再生処理
-    await startPlayback();
-    
-    showStatus(`読み込み完了: ${track.name}`);
-  } catch (e) {
-    console.error('トラック読み込みエラー:', e);
-    showStatus('エラー: ファイルを読み込めませんでした');
-  } finally {
+
+  currentIndex=idx; renderPlaylist();
+  const file = playlist[idx];
+
+  try{
+    /* -------- データ読み込み -------- */
+    const arr = await file.arrayBuffer();
+    const audioBuf = await Tone.context.decodeAudioData(arr);
+
+    /* -------- WebAudio ノード構築 -------- */
+    pitchNode ??= new Tone.PitchShift({
+      pitch: parseInt(document.getElementById('pitchSlider').value)
+    }).toDestination();
+
+    /* MediaStreamDestination で <audio> へブリッジ */
+    const dest = Tone.context.createMediaStreamDestination();
+    player = new Tone.Player(audioBuf)
+                .connect(pitchNode)
+                .connect(dest);
+    bgHolder.srcObject = dest.stream;   // Safari: AudioSession を認識
+    bgHolder.play().catch(()=>{});      // user-gesture 後なので許可される
+
+    /* 曲終了時のハンドラ */
+    player.onstop = ()=> nextTrack();
+
+    /* -------- 再生開始 -------- */
+    await Tone.start();
+    if(Tone.context.state==='suspended') await Tone.context.resume();
+
+    startKeepAwake();                   // Chrome/iOS 安定化（無音ループ）
+    player.start();
+    player._startedAt = Tone.now();
+    updateSeekBar();
+
+    /* Media Session API でロック画面情報 */
+    if ('mediaSession' in navigator){
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: file.name,
+        artist: 'MP3 キーチェンジャー',
+        album: '',
+        artwork:[]
+      });
+    }
+
+    playStatus.textContent='再生中';
+    playStatus.style.color='green';
+  }catch(err){
+    console.error(err);
+    alert('このファイルは再生できませんでした。');
+  }finally{
     showLoading(false);
   }
 }
-
-// ファイルをArrayBufferとして読み込む
-function readFileAsArrayBuffer(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.onerror = (e) => reject(e);
-    reader.readAsArrayBuffer(file);
+function playAudio(){
+  if(!player) return;
+  Tone.start().then(()=>{
+    if(player.state!=='started'){
+      player.start();
+      player._startedAt = Tone.now() - seekSlider.value;
+      updateSeekBar();
+      startKeepAwake();
+      playStatus.textContent='再生中';
+      playStatus.style.color='green';
+    }
   });
 }
-
-// 再生開始
-async function startPlayback() {
-  if (!player) return;
-  
-  try {
-    // AudioContextを開始
-    await Tone.start();
-    if (audioContext.state !== 'running') {
-      await audioContext.resume();
-    }
-    
-    // バックグラウンド再生用の要素を開始
-    startBackgroundElements();
-    
-    // <audio>要素を再生
-    try {
-      await audioElement.play();
-    } catch (e) {
-      console.warn('audioElement再生エラー:', e);
-    }
-    
-    // プレイヤー開始
-    player.start();
-    player._startedAt = Tone.now();
-    
-    // シークバー更新開始
-    updateSeekBar();
-    
-    // UI更新
-    playStatus.textContent = '再生中';
-    playStatus.style.color = 'green';
-    
-    // MediaSession状態更新
-    updateMediaSessionState('playing');
-    
-    console.log('再生開始');
-  } catch (e) {
-    console.error('再生開始エラー:', e);
-    showStatus('エラー: 再生を開始できませんでした');
-  }
-}
-
-// 再生
-function playAudio() {
-  if (tracks.length === 0) {
-    showStatus('プレイリストに曲がありません');
-    return;
-  }
-  
-  if (currentTrackIndex === -1) {
-    currentTrackIndex = 0;
-    loadTrack(currentTrackIndex);
-    return;
-  }
-  
-  if (player) {
-    if (player.state !== 'started') {
-      // 再生開始
-      startPlayback();
-    }
-  } else {
-    // トラックが読み込まれていない場合は読み込み
-    loadTrack(currentTrackIndex);
-  }
-}
-
-// 一時停止
-function pauseAudio() {
-  if (!player) return;
-  
-  try {
-    if (player.state === 'started') {
-      player.stop();
-      clearInterval(timer);
-      
-      playStatus.textContent = '一時停止';
-      playStatus.style.color = 'orange';
-      
-      updateMediaSessionState('paused');
-      
-      showStatus('一時停止しました');
-    }
-  } catch (e) {
-    console.error('一時停止エラー:', e);
-  }
-}
-
-// 停止
-function stopAudio(reset = true) {
-  try {
-    if (player) {
-      player.stop();
-      player.dispose();
-      player = null;
-    }
-    
-    clearInterval(timer);
-    seekSlider.value = 0;
-    timeDisplay.textContent = '--:-- / --:--';
-    
-    if (reset) {
-      playStatus.textContent = '停止';
-      playStatus.style.color = 'gray';
-      updateMediaSessionState('none');
-      showStatus('停止しました');
-    }
-  } catch (e) {
-    console.error('停止エラー:', e);
-  }
-}
-
-// 次のトラック
-function nextTrack() {
-  if (tracks.length === 0) return;
-  
-  const nextIndex = (currentTrackIndex + 1) % tracks.length;
-  loadTrack(nextIndex);
-}
-
-// ピッチ変更
-function updatePitch(e) {
-  if (e && e.target) {
-    const pitch = parseInt(e.target.value);
-    pitchValue.textContent = pitch;
-    
-    if (pitchShift) {
-      pitchShift.pitch = pitch;
-    }
-  }
-}
-
-// ピッチ調整ボタン
-function adjustPitch(step) {
-  const currentPitch = parseInt(pitchSlider.value);
-  const newPitch = Math.max(-12, Math.min(12, currentPitch + step));
-  
-  pitchSlider.value = newPitch;
-  pitchValue.textContent = newPitch;
-  
-  if (pitchShift) {
-    pitchShift.pitch = newPitch;
-  }
-}
-
-// シーク処理
-function handleSeek(e) {
-  if (!player || !player.buffer) return;
-  
-  try {
-    const percent = e.target.value;
-    const seekTime = (percent / 100) * player.buffer.duration;
-    
+function pauseAudio(){
+  if(player && player.state==='started'){
     player.stop();
-    player.start(undefined, seekTime);
-    player._startedAt = Tone.now() - seekTime;
-    
-    // バックグラウンド再生用の要素が停止した場合に再開
-    startBackgroundElements();
-  } catch (e) {
-    console.error('シークエラー:', e);
+    playStatus.textContent='一時停止';
+    playStatus.style.color='orange';
+    clearInterval(timer);
+    keepAwake.pause();
   }
 }
-
-// シークバー更新
-function updateSeekBar() {
+function stopAudio(reset=true){
+  if(player){ player.stop(); player.dispose(); player=null; }
   clearInterval(timer);
-  
-  if (!player || !player.buffer) return;
-  
-  // 最大値を設定
-  const duration = player.buffer.duration;
-  
-  // 表示更新関数
-  const refresh = () => {
-    if (!player || !player._startedAt) return;
-    
-    try {
-      const currentTime = Tone.now() - player._startedAt;
-      const percent = (currentTime / duration) * 100;
-      
-      // スライダー更新
-      seekSlider.value = Math.min(100, Math.max(0, percent));
-      
-      // 時間表示更新
-      timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
-      
-      // 曲終了検出
-      if (currentTime >= duration && player.state === 'started') {
-        console.log('曲の終了を検出');
-        nextTrack();
-      }
-    } catch (e) {
-      console.warn('シークバー更新エラー:', e);
-    }
+  seekSlider.value=0; timeDisp.textContent='--:-- / --:--';
+  if(reset){
+    playStatus.textContent='停止';
+    playStatus.style.color='gray';
+  }
+  keepAwake.pause();
+}
+function nextTrack(){
+  if(!playlist.length) return;
+  const n = shuffle
+    ? (playlist.length===1 ? currentIndex
+       : (()=>{let r;do{r=Math.floor(Math.random()*playlist.length);}while(r===currentIndex);return r;})())
+    : (currentIndex+1)%playlist.length;
+  loadAndPlay(n);
+}
+function toggleShuffle(){
+  shuffle=!shuffle;
+  document.getElementById('shuffleState').textContent=shuffle?'ON':'OFF';
+}
+
+/* ───────── シークバー ───────── */
+seekSlider.addEventListener('input', e=>{
+  if(player && player.buffer){
+    const dest=parseFloat(e.target.value);
+    player.stop();
+    player.start(undefined,dest);
+    player._startedAt = Tone.now()-dest;
+  }
+});
+function updateSeekBar(){
+  clearInterval(timer);
+  if(!player||!player.buffer) return;
+  seekSlider.max = player.buffer.duration;
+
+  const refresh = ()=>{
+    const pos = Tone.now() - player._startedAt;
+    seekSlider.value = Math.min(pos, player.buffer.duration);
+    timeDisp.textContent = `${fmt(pos)} / ${fmt(player.buffer.duration)}`;
   };
-  
-  // 初回更新
   refresh();
-  
-  // 定期更新
-  timer = setInterval(refresh, 250);
+  timer=setInterval(refresh,500);
 }
 
-// 時間フォーマット (mm:ss)
-function formatTime(seconds) {
-  if (isNaN(seconds)) return '--:--';
-  
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-// ローディング表示切替
-function showLoading(show) {
-  loadingOverlay.style.display = show ? 'flex' : 'none';
-}
-
-// 状態メッセージ表示
-function showStatus(message, duration = 3000) {
-  statusMessage.textContent = message;
-  statusMessage.style.display = 'block';
-  
-  // オプション: 一定時間後に非表示
-  /*
-  setTimeout(() => {
-    statusMessage.style.display = 'none';
-  }, duration);
-  */
-}
-
-// MediaSession設定
-function setupMediaSession(trackName) {
-  if (!('mediaSession' in navigator)) return;
-  
-  try {
-    // メタデータ設定
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: trackName || 'Unknown Track',
-      artist: 'MP3 キーチェンジャー',
-      album: 'バックグラウンド再生対応',
-      artwork: [
-        { src: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23007aff"/%3E%3Ccircle cx="50" cy="50" r="40" fill="%23fff"/%3E%3Cpolygon points="40,30 70,50 40,70" fill="%23007aff"/%3E%3C/svg%3E',
-          sizes: '512x512',
-          type: 'image/svg+xml'
-        }
-      ]
-    });
-    
-    // アクションハンドラ設定
-    const actionHandlers = {
-      play: playAudio,
-      pause: pauseAudio,
-      stop: stopAudio,
-      nexttrack: nextTrack
-    };
-    
-    // 各アクションハンドラの登録
-    for (const [action, handler] of Object.entries(actionHandlers)) {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch (e) {
-        console.warn(`MediaSession アクション '${action}' 非対応:`, e);
-      }
+/* ───────── 背景⇄前面 切替処理 ───────── */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    /* iOS Chrome: back → WebAudio が止まる前に keepAwake を継続 */
+    startKeepAwake();
+  }else{
+    /* 前面復帰時、AudioContext が interrupted なら再開 */
+    if(Tone.context.state!=='running'){
+      Tone.context.resume().catch(()=>{});
     }
-    
-    console.log('MediaSession設定完了');
-  } catch (e) {
-    console.error('MediaSession設定エラー:', e);
   }
+});
+
+/* ───────── 付加ユーティリティ ───────── */
+function startKeepAwake(){
+  /* Safari では無音ループは無視されるが害はない。
+     Chrome/iOS ではこれがあると WebAudio が止まりにくい。*/
+  keepAwake.play().catch(()=>{});
 }
 
-// MediaSession状態更新
-function updateMediaSessionState(state) {
-  if (!('mediaSession' in navigator)) return;
-  
-  try {
-    navigator.mediaSession.playbackState = state;
-    
-    // 位置情報更新
-    if (state === 'playing' && player && player.buffer && 'setPositionState' in navigator.mediaSession) {
-      const duration = player.buffer.duration;
-      const position = Tone.now() - player._startedAt;
-      
-      navigator.mediaSession.setPositionState({
-        duration: duration,
-        position: Math.min(position, duration),
-        playbackRate: 1.0
-      });
-    }
-  } catch (e) {
-    console.warn('MediaSession状態更新エラー:', e);
-  }
-}
-
-// バックグラウンド要素の開始
-function startBackgroundElements() {
-  try {
-    // 無音要素を再生
-    silentAudio.play().catch(() => {});
-    silent
+/* =============== END =============== */
+  </script>
+</body>
+</html>
