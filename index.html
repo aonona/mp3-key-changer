@@ -35,7 +35,7 @@
 <body>
   <div class="loading-overlay" id="loadingOverlay">読み込み中...</div>
 
-  <!-- Media Session API を使えばロック画面操作も可能です（iOS 15+） -->
+  <!-- ================= プレイヤー UI ================= -->
   <input type="file" id="fileInput" multiple accept=".mp3,audio/mpeg">
   <div id="playlist"></div>
 
@@ -67,27 +67,39 @@
   <footer>
     <span id="metaInfo">プレイリスト: 0 曲</span>
     <span id="playStatus">未再生</span>
-    <span class="version">v1.7</span>
+    <span class="version">v1.8</span>
   </footer>
+
+  <!-- ============= 背景再生を支える隠し audio ============= -->
+  <!-- (1) Safari・Chrome 共通: Web Audio の出力をここに流し込み AudioSession を確立 -->
+  <audio id="bgHolder" muted playsinline style="display:none"></audio>
+
+  <!-- (2) Chrome/iOS 用: 無音ループで AudioSession を維持（必須ではないが安定度向上） -->
+  <audio id="keepAwake"
+         src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAwCAAH/////8AAABhTEFNRTMuOTlyBLkAAAAAAAAAAAACAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg"
+         loop
+         style="display:none"></audio>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.js"></script>
   <script>
-/* ───── 変数 & DOM ───── */
+/* ───────── 変数 & DOM ───────── */
 const playStatus = document.getElementById('playStatus');
 const timeDisp   = document.getElementById('timeDisplay');
 const seekSlider = document.getElementById('seekSlider');
 const loadingLay = document.getElementById('loadingOverlay');
 const metaInfo   = document.getElementById('metaInfo');
 const fileInput  = document.getElementById('fileInput');
+const bgHolder   = document.getElementById('bgHolder');
+const keepAwake  = document.getElementById('keepAwake');
 
 let playlist=[], currentIndex=-1, shuffle=false;
 let player=null, pitchNode=null, timer=null;
 
-/* ───── 共通 ───── */
+/* ───────── 共通関数 ───────── */
 const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
 const fmt = s => isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-/* ───── ファイル追加 ───── */
+/* ───────── ファイル追加 ───────── */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
@@ -109,7 +121,7 @@ function renderPlaylist(){
   metaInfo.textContent=`プレイリスト: ${playlist.length} 曲`;
 }
 
-/* ───── ピッチ ───── */
+/* ───────── ピッチ変更 ───────── */
 document.getElementById('pitchSlider').addEventListener('input', e=>{
   if(pitchNode) pitchNode.pitch = parseInt(e.target.value);
   document.getElementById('pitchValue').textContent = e.target.value;
@@ -120,9 +132,10 @@ function adjustPitch(step){
   s.dispatchEvent(new Event('input'));
 }
 
-/* ───── 再生制御 ───── */
+/* ───────── 再生制御メイン ───────── */
 async function loadAndPlay(idx){
   if(!playlist.length) return;
+
   showLoading(true);
   stopAudio(false);
 
@@ -130,22 +143,44 @@ async function loadAndPlay(idx){
   const file = playlist[idx];
 
   try{
+    /* -------- データ読み込み -------- */
     const arr = await file.arrayBuffer();
     const audioBuf = await Tone.context.decodeAudioData(arr);
 
+    /* -------- WebAudio ノード構築 -------- */
     pitchNode ??= new Tone.PitchShift({
       pitch: parseInt(document.getElementById('pitchSlider').value)
     }).toDestination();
 
-    player = new Tone.Player(audioBuf).connect(pitchNode);
+    /* MediaStreamDestination で <audio> へブリッジ */
+    const dest = Tone.context.createMediaStreamDestination();
+    player = new Tone.Player(audioBuf)
+                .connect(pitchNode)
+                .connect(dest);
+    bgHolder.srcObject = dest.stream;   // Safari: AudioSession を認識
+    bgHolder.play().catch(()=>{});      // user-gesture 後なので許可される
+
+    /* 曲終了時のハンドラ */
     player.onstop = ()=> nextTrack();
 
+    /* -------- 再生開始 -------- */
     await Tone.start();
     if(Tone.context.state==='suspended') await Tone.context.resume();
 
+    startKeepAwake();                   // Chrome/iOS 安定化（無音ループ）
     player.start();
     player._startedAt = Tone.now();
     updateSeekBar();
+
+    /* Media Session API でロック画面情報 */
+    if ('mediaSession' in navigator){
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: file.name,
+        artist: 'MP3 キーチェンジャー',
+        album: '',
+        artwork:[]
+      });
+    }
 
     playStatus.textContent='再生中';
     playStatus.style.color='green';
@@ -163,6 +198,7 @@ function playAudio(){
       player.start();
       player._startedAt = Tone.now() - seekSlider.value;
       updateSeekBar();
+      startKeepAwake();
       playStatus.textContent='再生中';
       playStatus.style.color='green';
     }
@@ -174,6 +210,7 @@ function pauseAudio(){
     playStatus.textContent='一時停止';
     playStatus.style.color='orange';
     clearInterval(timer);
+    keepAwake.pause();
   }
 }
 function stopAudio(reset=true){
@@ -184,6 +221,7 @@ function stopAudio(reset=true){
     playStatus.textContent='停止';
     playStatus.style.color='gray';
   }
+  keepAwake.pause();
 }
 function nextTrack(){
   if(!playlist.length) return;
@@ -198,7 +236,7 @@ function toggleShuffle(){
   document.getElementById('shuffleState').textContent=shuffle?'ON':'OFF';
 }
 
-/* ───── シークバー ───── */
+/* ───────── シークバー ───────── */
 seekSlider.addEventListener('input', e=>{
   if(player && player.buffer){
     const dest=parseFloat(e.target.value);
@@ -221,7 +259,27 @@ function updateSeekBar(){
   timer=setInterval(refresh,500);
 }
 
-/* ==== END ==== */
+/* ───────── 背景⇄前面 切替処理 ───────── */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    /* iOS Chrome: back → WebAudio が止まる前に keepAwake を継続 */
+    startKeepAwake();
+  }else{
+    /* 前面復帰時、AudioContext が interrupted なら再開 */
+    if(Tone.context.state!=='running'){
+      Tone.context.resume().catch(()=>{});
+    }
+  }
+});
+
+/* ───────── 付加ユーティリティ ───────── */
+function startKeepAwake(){
+  /* Safari では無音ループは無視されるが害はない。
+     Chrome/iOS ではこれがあると WebAudio が止まりにくい。*/
+  keepAwake.play().catch(()=>{});
+}
+
+/* =============== END =============== */
   </script>
 </body>
 </html>
