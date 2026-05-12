@@ -93,17 +93,58 @@ const bgHolder   = document.getElementById('bgHolder');
 const keepAwake  = document.getElementById('keepAwake');
 
 let playlist=[], currentIndex=-1, shuffle=false;
-let player=null, pitchNode=null, timer=null;
+let player=null, pitchNode=null, timer=null, endTimer=null;
+let pausedAt=0, isPlaying=false;
 
 /* ───────── 共通関数 ───────── */
 const showLoading = f => loadingLay.style.display = f ? 'flex' : 'none';
 const fmt = s => isNaN(s)?'--:--':`${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+const getSeekPosition = () => parseFloat(seekSlider.value) || 0;
+const isSameFile = (a, b) => a.name===b.name && a.size===b.size && a.lastModified===b.lastModified;
+
+function clearPlaybackTimers(){
+  clearInterval(timer);
+  clearTimeout(endTimer);
+  timer=null;
+  endTimer=null;
+}
+
+function getCurrentPosition(){
+  if(!player || !player.buffer) return 0;
+  if(isPlaying) return Math.min(Tone.now() - player._startedAt, player.buffer.duration);
+  return Math.min(getSeekPosition() || pausedAt, player.buffer.duration);
+}
+
+function scheduleTrackEnd(offset=0){
+  clearTimeout(endTimer);
+  if(!player || !player.buffer) return;
+  const remaining = Math.max(player.buffer.duration - offset, 0);
+  endTimer = setTimeout(()=>{
+    endTimer=null;
+    if(player && isPlaying){
+      isPlaying=false;
+      nextTrack();
+    }
+  }, remaining * 1000 + 100);
+}
+
+function startPlayerFrom(offset=0){
+  if(!player || !player.buffer) return;
+  const duration = player.buffer.duration;
+  const safeOffset = Math.min(Math.max(offset, 0), Math.max(duration - 0.01, 0));
+  player.start(undefined, safeOffset);
+  player._startedAt = Tone.now() - safeOffset;
+  pausedAt = safeOffset;
+  isPlaying = true;
+  updateSeekBar();
+  scheduleTrackEnd(safeOffset);
+}
 
 /* ───────── ファイル追加 ───────── */
 fileInput.addEventListener('change', e=>{
   if(!e.target.files.length){ fileInput.value=''; return; }
   Array.from(e.target.files).forEach(f=>{
-    if(!playlist.some(p=>p.name===f.name)) playlist.push(f);
+    if(!playlist.some(p=>isSameFile(p, f))) playlist.push(f);
   });
   fileInput.value='';
   renderPlaylist();
@@ -160,17 +201,13 @@ async function loadAndPlay(idx){
     bgHolder.srcObject = dest.stream;   // Safari: AudioSession を認識
     bgHolder.play().catch(()=>{});      // user-gesture 後なので許可される
 
-    /* 曲終了時のハンドラ */
-    player.onstop = ()=> nextTrack();
-
     /* -------- 再生開始 -------- */
     await Tone.start();
     if(Tone.context.state==='suspended') await Tone.context.resume();
 
     startKeepAwake();                   // Chrome/iOS 安定化（無音ループ）
-    player.start();
-    player._startedAt = Tone.now();
-    updateSeekBar();
+    pausedAt = 0;
+    startPlayerFrom(0);
 
     /* Media Session API でロック画面情報 */
     if ('mediaSession' in navigator){
@@ -195,10 +232,10 @@ function playAudio(){
   if(!player) return;
   Tone.start().then(()=>{
     if(player.state!=='started'){
-      player.start();
-      player._startedAt = Tone.now() - seekSlider.value;
-      updateSeekBar();
+      let offset = getSeekPosition() || pausedAt;
+      if(player.buffer && offset >= player.buffer.duration) offset = 0;
       startKeepAwake();
+      startPlayerFrom(offset);
       playStatus.textContent='再生中';
       playStatus.style.color='green';
     }
@@ -206,16 +243,22 @@ function playAudio(){
 }
 function pauseAudio(){
   if(player && player.state==='started'){
+    pausedAt = getCurrentPosition();
+    isPlaying = false;
     player.stop();
+    clearPlaybackTimers();
+    seekSlider.value = pausedAt;
+    if(player.buffer) timeDisp.textContent = `${fmt(pausedAt)} / ${fmt(player.buffer.duration)}`;
     playStatus.textContent='一時停止';
     playStatus.style.color='orange';
-    clearInterval(timer);
     keepAwake.pause();
   }
 }
 function stopAudio(reset=true){
+  isPlaying=false;
+  pausedAt=0;
+  clearPlaybackTimers();
   if(player){ player.stop(); player.dispose(); player=null; }
-  clearInterval(timer);
   seekSlider.value=0; timeDisp.textContent='--:-- / --:--';
   if(reset){
     playStatus.textContent='停止';
@@ -240,9 +283,15 @@ function toggleShuffle(){
 seekSlider.addEventListener('input', e=>{
   if(player && player.buffer){
     const dest=parseFloat(e.target.value);
-    player.stop();
-    player.start(undefined,dest);
-    player._startedAt = Tone.now()-dest;
+    pausedAt = dest;
+    if(player.state==='started'){
+      isPlaying=false;
+      player.stop();
+      clearPlaybackTimers();
+      startPlayerFrom(dest);
+    }else{
+      timeDisp.textContent = `${fmt(dest)} / ${fmt(player.buffer.duration)}`;
+    }
   }
 });
 function updateSeekBar(){
@@ -251,8 +300,8 @@ function updateSeekBar(){
   seekSlider.max = player.buffer.duration;
 
   const refresh = ()=>{
-    const pos = Tone.now() - player._startedAt;
-    seekSlider.value = Math.min(pos, player.buffer.duration);
+    const pos = Math.min(Tone.now() - player._startedAt, player.buffer.duration);
+    seekSlider.value = pos;
     timeDisp.textContent = `${fmt(pos)} / ${fmt(player.buffer.duration)}`;
   };
   refresh();
